@@ -1,0 +1,162 @@
+/** 津波情報の表示 */
+.tsunami {
+    font-size: 2rem;
+    font-weight: bold;
+}
+
+/** 地震情報：震度情報の表示 */
+.seismic_intensity {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 20px;
+}
+
+/** 生野区の震度表示 */
+.seismic_intensity_ikuno {
+    border: 2px solid;
+    padding: 10px;
+    text-align: center;
+}
+
+/** 最大震度の表示 */
+.seismic_intensity_max {
+    background: #f00;
+    color: #fff;
+    padding: 10px;
+    text-align: center;
+}
+
+/** 震度表示 */
+.seismic_intensity_num {
+    font-size: 3.5rem;
+}
+
+/** 避難情報表示 */
+.evacuation {
+    font-size: 2rem;
+    font-weight: bold;
+}
+
+/** ニュースのタイトル */
+.news_title {
+    color: var(--mint-green);
+    font-size: 1.8rem;
+}
+
+/** ニュースの本文 */
+.news_article {
+    font-size: 1.6rem;
+    line-height: 1.6;
+}
+
+/** 3時間ごとの天気予報 */
+.weather_time {
+    padding: 5px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 5px;
+}
+
+/** 予想天気予報の時刻 */
+.weather_time_hour {
+    font-size: 1rem;
+    color: var(--snow-gray-text);
+}
+
+/** 3時間ごとの天気の天気予報アイコン */
+.weather_time_icon {
+    width: 55px;
+    height: 55px;
+    margin: 2px 0;
+}
+
+/** 3時間ごとの天気予報・気温情報 */
+.weather_time_msg {
+    font-size: 1.2rem;
+    font-weight: bold;
+}
+
+/** 現在の天気 */
+.weather_now {
+    display: flex;
+    align-items: center;
+    gap: 30px;
+    margin-bottom: 15px;
+    padding-left: 10px;
+}
+
+/** 現在の天気のアイコン */
+.weather_icon_now {
+    width: 120px;
+    height: 120px;
+}
+
+/** 現在の気温 */
+.weather_temperature_now {
+    font-size: 2.8rem;
+    font-weight: bold;
+    color: var(--sky-yellow);
+}
+
+/** 現在の天気の名称 */
+.weather_name_now {
+    font-size: 1.8rem;
+}
+
+/** 3時間ごとの天気予報のグリッド表示 */
+.weather_time_grid {
+    font-size: 1rem;
+    margin-bottom: 10px;
+    border-top: 1px solid #333;
+    padding-top: 10px;
+    color: var(--snow-gray-text);
+}
+
+/** グリッドの中の要素 */
+.weather_time_grid_list {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+}
+
+/** 明日の天気 */
+.weather_tomorrow {
+    text-align: center;
+    margin-top: 30px;
+}
+
+/** 明日の天気アイコン */
+.weather_icon_tomorrow {
+    width: 180px;
+    height: 180px;
+}
+
+/** 明日の天気の名称 */
+.weather_name_tomorrow {
+    font-size: 3.5rem;
+    font-weight: bold;
+    color: var(--snow-white);
+}
+
+/** 明日の気温 */
+.weather_temperature_tomorrow {
+    font-size: 2.5rem;
+    margin-top: 10px;
+    display: block;
+}
+
+/** 明日の最高気温 */
+.weather_temperature_max_tomorrow {
+    color: var(--alert-red-bg);
+    font-weight: bold;
+}
+
+/** 最高気温と最低気温の区切り */
+.weather_slash_tomorrow {
+    color: var(--snow-gray-text);
+    margin: 0 10px;
+}
+
+/** 明日の最低気温 */
+.weather_temperature_min_tomorrow {
+    color: var(--sky-blue);
+    font-weight: bold;
+}

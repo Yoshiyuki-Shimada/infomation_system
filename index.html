@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="ja">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>デジタルサイネージシステム</title>
+
+        <link rel="stylesheet" href="style/style.css" />
+        <link rel="stylesheet" href="style/infomationData.css" />
+    </head>
+    <body>
+        <div id="app" class="container">
+            <div class="info-panel">
+                <div class="header">
+                    <div>
+                        <span>田島三丁目</span>
+                        <span style="font-size: 1.4rem; margin-left: 10px"
+                            >Tajima 3-chome</span
+                        >
+                    </div>
+                    <div id="debug-mode">判定中...</div>
+                </div>
+
+                <div class="bus-section">
+                    <div class="direction-bar">
+                        <div class="direction-text-group">
+                            <span
+                                >大池橋・地下鉄今里・守口車庫前方面 /
+                                なんば方面</span
+                            >
+                            <span class="eng-sub"
+                                >For Oikebashi / Subway Imazato /
+                                Moriguchishako-mae / Namba</span
+                            >
+                        </div>
+                        <span class="page-indicator" id="page-oikebashi"></span>
+                    </div>
+                    <div class="bus-list" id="list-oikebashi"></div>
+                </div>
+
+                <div class="bus-section">
+                    <div class="direction-bar">
+                        <div class="direction-text-group">
+                            <span>杭全・出戸バスターミナル方面</span>
+                            <span class="eng-sub"
+                                >For Kumata / Deto Bus Terminal</span
+                            >
+                        </div>
+                        <span class="page-indicator" id="page-kumata"></span>
+                    </div>
+                    <div class="bus-list" id="list-kumata"></div>
+                </div>
+
+                <div class="bus-section">
+                    <div class="direction-bar">
+                        <div class="direction-text-group">
+                            <span>百済・寺田町駅前・あべの橋方面</span>
+                            <span class="eng-sub"
+                                >For Kudara / Teradacho Station /
+                                Abenobashi</span
+                            >
+                        </div>
+                        <span
+                            class="page-indicator"
+                            id="page-abenobashi"
+                        ></span>
+                    </div>
+                    <div class="bus-list" id="list-abenobashi"></div>
+                </div>
+
+                <div class="liner-panel">
+                    <div
+                        class="direction-bar-imazatoLiner orange"
+                        id="liner-header"
+                    >
+                        <span>いまざとライナー</span>
+                        <span class="eng-sub">Imazato Liner</span>
+                    </div>
+                    <div class="liner-content" id="list-liner"></div>
+                </div>
+            </div>
+
+            <div class="clock-panel" id="right-panel">
+                <div class="signage-header" id="signage-header">
+                    <span class="header-date" id="date-small">　　</span>
+                    <span class="header-clock" id="clock-small">　　</span>
+                </div>
+                <div class="idle-clock" id="idle-view">
+                    <div
+                        class="idle-time"
+                        id="clock-big"
+                        style="font-size: 11rem; font-weight: bold"
+                    ></div>
+                    <div
+                        class="idle-date"
+                        id="date-big"
+                        style="font-size: 2.5rem"
+                    ></div>
+                </div>
+
+                <div class="slide-area" id="slide-container"></div>
+            </div>
+        </div>
+
+        <script src="app/schedule-register.js"></script>
+        <script src="database/schedule-list.js"></script>
+        <script src="app/schedule-loader.js"></script>
+        <script src="temp/news_data.js" id="data-script"></script>
+        <script src="database/routeMaster.js"></script>
+        <script src="app/busInfo.js"></script>
+        <script src="app/multiInfo.js"></script>
+        <script src="app/multiInfoCreateHtml.js"></script>
+        <script src="app/system.js"></script>
+    </body>
+</html>
