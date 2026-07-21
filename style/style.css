@@ -545,6 +545,86 @@ html {
     overflow: hidden;
 }
 
+.auto-scroll-viewport {
+    position: relative;
+    overflow: hidden;
+}
+
+.auto-scroll-content {
+    min-height: 100%;
+    will-change: transform;
+}
+
+.railway-scroll-content {
+    display: flex;
+    flex-direction: column;
+}
+.railway-fixed-layout {
+    gap: 12px;
+}
+
+.railway-fixed-header {
+    flex: 0 0 auto;
+}
+
+.railway-fixed-header .railway-badge {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.railway-body-viewport {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.railway-body-scroll {
+    min-height: auto;
+}
+
+.railway-fixed-layout .railway-main-body {
+    margin-bottom: 0;
+}
+
+.railway-fixed-layout > .railway-detail-list {
+    flex: 0 0 auto;
+    margin-top: 0;
+    max-height: 42%;
+    overflow: hidden;
+}
+.news-fixed-layout {
+    gap: 12px;
+}
+
+.news-fixed-header {
+    flex: 0 0 auto;
+}
+
+.news-fixed-header p {
+    margin-top: 0;
+    margin-bottom: 0;
+}
+
+.news-body-viewport {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.news-body-scroll {
+    min-height: auto;
+}
+
+.auto-scroll-content.is-scrolling {
+    animation: autoScroll var(--auto-scroll-duration, 24s) linear var(--auto-scroll-delay, 10s) forwards;
+}
+
+@keyframes autoScroll {
+    from {
+        transform: translateY(0);
+    }
+    to {
+        transform: translateY(var(--auto-scroll-distance, 0));
+    }
+}
 .line_name {
     display: flex;
     align-items: center; /* 縦中央揃え */

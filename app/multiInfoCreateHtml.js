@@ -116,7 +116,7 @@ function resumeStrHtml(resumeStr) {
 /**
  * 運行情報のHTMLを生成
  * @param {*} r 運行情報の概要・タイトル
- * @param {*} chunk 対象のページの本文
+ * @param {*} chunk 表示する本文
  * @returns 生成後のHTML
  */
 function createRailwayInfoBodyHtml(
@@ -125,28 +125,55 @@ function createRailwayInfoBodyHtml(
     badgeBg,
     badgeText,
     fixedBottomHtml,
-    pageNumTag,
 ) {
+    const railwayHeaderHtml = `
+        <div class="railway-badge" style="background:${badgeBg}; color:${badgeText};">
+            <div class="line_name">
+                ${getLineSymbolHtml(r.name, r.msg, r.lineCode || "")}${r.name}
+            </div>
+        </div>
+
+        <div class="railway-main-title">
+            ${r.title || "運行情報"}
+        </div>
+    `;
+
+    if (r.lineCode == TRAIN_COMPANY.JR_WEST) {
+        return `
+            <div class="slide">
+                <div class="slide-title">列車運行情報</div>
+                <div class="slide-content railway-fixed-layout">
+                    <div class="railway-fixed-header">
+                        ${railwayHeaderHtml}
+                    </div>
+
+                    <div class="auto-scroll-viewport railway-body-viewport">
+                        <div class="auto-scroll-content railway-body-scroll">
+                            <div class="railway-main-body">
+                                ${chunk.replace(/\n/g, "<br>")}
+                            </div>
+                        </div>
+                    </div>
+
+                    ${fixedBottomHtml}
+                </div>
+            </div>
+        `;
+    }
+
     return `
         <div class="slide">
             <div class="slide-title">列車運行情報</div>
-            <div class="slide-content">
-                <div class="railway-badge" style="background:${badgeBg}; color:${badgeText};">
-                    <div class="line_name">
-                        ${getLineSymbolHtml(r.name, r.msg, r.lineCode || "")}${r.name}
+            <div class="slide-content auto-scroll-viewport">
+                <div class="auto-scroll-content railway-scroll-content">
+                    ${railwayHeaderHtml}
+
+                    <div class="railway-main-body">
+                        ${chunk.replace(/\n/g, "<br>")}
                     </div>
+                    ${fixedBottomHtml}
                 </div>
-
-                <div class="railway-main-title">
-                    ${r.title || "運行情報"}
-                </div>
-
-                <div class="railway-main-body">
-                    ${chunk.replace(/\n/g, "<br>")}
-                </div>
-            ${fixedBottomHtml}
             </div>
-            ${pageNumTag}
         </div>
     `;
 }
@@ -155,18 +182,23 @@ function createRailwayInfoBodyHtml(
  * ニュースのHTMLを生成
  * @param {*} title ニュースのタイトル
  * @param {*} htmlText ニュースの本文
- * @param {*} pageNum ページ番号
  * @returns 生成後のHTML
  */
-function createNewsDataHtml(title, htmlText, pageNum) {
+function createNewsDataHtml(title, htmlText) {
     return `
         <div class="slide">
             <div class="slide-title">ニュース</div>
-            <div class="slide-content">
-                <p><b class="news_title">${title}</b></p>
-                <div class="news_article">${htmlText}</div>
+            <div class="slide-content news-fixed-layout">
+                <div class="news-fixed-header">
+                    <p><b class="news_title">${title}</b></p>
+                </div>
+
+                <div class="auto-scroll-viewport news-body-viewport">
+                    <div class="auto-scroll-content news-body-scroll">
+                        <div class="news_article">${htmlText}</div>
+                    </div>
+                </div>
             </div>
-            ${pageNum}
         </div>
     `;
 }
