@@ -18,8 +18,7 @@ scheduleLoadPromise
         }
     });
 
-// 30秒ごとのスライド切り替え
-setInterval(showSlide, 30000);
+// スライド切り替えは、各スライドの表示時間に合わせて showSlide 側で予約します
 
 // 1秒ごとにデータ再取得実行
 setInterval(fetchNewData, 1000);

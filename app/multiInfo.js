@@ -1,6 +1,11 @@
 /** 表示させる情報の番号 */
 let currentSlide = 0;
 
+let slideTimerId = null;
+const DEFAULT_SLIDE_INTERVAL_MS = 30000;
+const SCROLL_END_WAIT_MS = 10000;
+const SCROLL_START_DELAY_MS = 10000;
+
 /** 表示される情報を格納するリスト */
 let slideList = [];
 
@@ -366,32 +371,15 @@ function importRailwayInfoData() {
                 );
             }
 
-            // 第4引数を true にして、行数上限まで詰め込む
-            const bodyChunks = splitTextByLines(
-                r.body || "",
-                TRAIN_INFO_LINE_LENGTH,
-                TEXT_LENGTH,
-                MODE.RAILWAY,
+            railwayList.push(
+                createRailwayInfoBodyHtml(
+                    r,
+                    r.body || "",
+                    badgeBg,
+                    badgeText,
+                    fixedBottomHtml,
+                ),
             );
-
-            bodyChunks.forEach((chunk, i) => {
-                
-                const pageNumTag =
-                    bodyChunks.length > 1
-                        ? `<div class="page-num">${i + 1}/${bodyChunks.length}</div>`
-                        : "";
-
-                railwayList.push(
-                    createRailwayInfoBodyHtml(
-                        r,
-                        chunk,
-                        badgeBg,
-                        badgeText,
-                        fixedBottomHtml,
-                        pageNumTag,
-                    ),
-                );
-            });
         });
     }
 }
@@ -411,27 +399,8 @@ function importNewsData() {
             .replace(/<[^>]+>/g, "") // その他のタグ（外側の <p> など）をきれいに消去
             .trim(); // 前後の余計な空行をカット
 
-        // 2. ページ分割（改行を考慮して、行数ベースでしっかり分けるよ）
-        const chunks = splitTextByLines(
-            processedBody,
-            NEWS_LINE_LENGTH,
-            TEXT_LENGTH,
-            MODE.NEWS,
-        );
-
-        const pages = chunks.map((text, i) => {
-            // 3. 表示する時に \n を <br> に戻して、HTMLとしての改行を再現！
-            const htmlText = text.replace(/\n/g, "<br>");
-
-            const pageNum =
-                chunks.length > 1
-                    ? `<div class="page-num">${i + 1}/${chunks.length}</div>`
-                    : "";
-
-            return createNewsDataHtml(n.title, htmlText, pageNum);
-        });
-
-        newsArticles.push(pages);
+        const htmlText = processedBody.replace(/\n/g, "<br>");
+        newsArticles.push([createNewsDataHtml(n.title, htmlText)]);
     });
 }
 
@@ -578,6 +547,7 @@ function importWeatherData() {
 
 /* インフォデータの取得失敗時 */
 function infoDataFailed() {
+    clearSlideTimer();
     const idleView = document.getElementById("idle-view");
     const headerView = document.getElementById("signage-header");
     const container = document.getElementById("slide-container");
@@ -594,12 +564,57 @@ function infoDataFailed() {
  * @returns データなしなら実行しない
  */
 function showSlide() {
+    clearSlideTimer();
+
     const slides = document.querySelectorAll(".slide");
     if (slides.length === 0) return;
     slides.forEach((s) => s.classList.remove("active"));
     currentSlide = currentSlide % slides.length;
-    slides[currentSlide].classList.add("active");
+    const activeSlide = slides[currentSlide];
+    activeSlide.classList.add("active");
+
+    const nextSlideInterval = prepareAutoScroll(activeSlide);
     currentSlide = (currentSlide + 1) % slides.length;
+    scheduleNextSlide(nextSlideInterval);
+}
+
+function clearSlideTimer() {
+    if (slideTimerId) {
+        clearTimeout(slideTimerId);
+        slideTimerId = null;
+    }
+}
+
+function scheduleNextSlide(intervalMs = DEFAULT_SLIDE_INTERVAL_MS) {
+    clearSlideTimer();
+    slideTimerId = setTimeout(showSlide, intervalMs);
+}
+
+function prepareAutoScroll(slide) {
+    const viewport = slide.querySelector(".auto-scroll-viewport");
+    if (!viewport) return DEFAULT_SLIDE_INTERVAL_MS;
+
+    const content = viewport.querySelector(".auto-scroll-content");
+    if (!content) return DEFAULT_SLIDE_INTERVAL_MS;
+
+    content.classList.remove("is-scrolling");
+    content.style.removeProperty("--auto-scroll-distance");
+    content.style.removeProperty("--auto-scroll-duration");
+    content.style.removeProperty("--auto-scroll-delay");
+    void content.offsetHeight;
+
+    const distance = content.scrollHeight - viewport.clientHeight;
+    if (distance <= 4) return DEFAULT_SLIDE_INTERVAL_MS;
+
+    const duration = Math.min(60, Math.max(20, distance / 8));
+    content.style.setProperty("--auto-scroll-distance", `-${distance}px`);
+    content.style.setProperty("--auto-scroll-duration", `${duration}s`);
+    content.style.setProperty("--auto-scroll-delay", `${SCROLL_START_DELAY_MS}ms`);
+    content.classList.add("is-scrolling");
+
+    const scrollCompleteInterval =
+        SCROLL_START_DELAY_MS + duration * 1000 + SCROLL_END_WAIT_MS;
+    return Math.max(DEFAULT_SLIDE_INTERVAL_MS, scrollCompleteInterval);
 }
 
 /**
