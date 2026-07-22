@@ -122,7 +122,7 @@ function getLineSymbolHtml(lineName, contextText = "", lineCode) {
             keywords: ["JR東西線", "学研都市線", "ＪＲ東西線"],
         },
         { area: "keihanshin_area", symbol: "I", keywords: ["加古川線"] },
-        { area: "keihanshin_area", symbol: "J", keywords: ["播担線"] },
+        { area: "keihanshin_area", symbol: "J", keywords: ["播但線", "播担線"] },
         { area: "keihanshin_area", symbol: "K", keywords: ["姫新線"] },
         { area: "keihanshin_area", symbol: "L", keywords: ["舞鶴線"] },
         { area: "keihanshin_area", symbol: "O", keywords: ["大阪環状線"] },
@@ -150,8 +150,9 @@ function getLineSymbolHtml(lineName, contextText = "", lineCode) {
     ];
 
     // 路線名に含まれるキーワードを探す
+    const searchText = `${lineName} ${contextText}`;
     const found = symbols.find((item) =>
-        item.keywords.some((k) => lineName.includes(k)),
+        item.keywords.some((k) => searchText.includes(k)),
     );
 
     if (found) {
