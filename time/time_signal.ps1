@@ -68,22 +68,29 @@ function Start-Time-Signal {
     $minPath = Join-Path $basePath "minutes_24h"
 
     # ファイルパス
+    $titleJustSound = Join-Path $hourPath "time_signal_just_title_sound.mp3"
     $titleSound = Join-Path $hourPath "time_signal_title_sound.mp3"
     $titleVoice = Join-Path $hourPath "time_signal_title_voice.mp3"
 
-    # ① ピロリン
-    Play-Sound $titleSound
 
-    # ② 時刻は
-    Play-Sound $titleVoice
 
     # 正時
     if ($minute -eq 0) {
+        # ① ピロリン
+        Play-Sound $titleJustSound
+
+        # ② 時刻は
+        Play-Sound $titleVoice
         $hourFile = Join-Path $hourPath "time_signal_${hour}_hour_just.mp3"
         Write-Output "時:$hourFile"
         Play-Sound $hourFile
     }
     else {
+        # ① ピロリン
+        Play-Sound $titleSound
+
+        # ② 時刻は
+        Play-Sound $titleVoice
         $hourFile = Join-Path $hourPath "time_signal_${hour}_hour.mp3"
         $minFile = Join-Path $minPath "time_signal_${minute}_min.mp3"
 
