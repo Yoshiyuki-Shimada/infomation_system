@@ -495,29 +495,60 @@ function importWeatherData() {
             return d > now && d.getHours() % 3 === 0;
         });
 
-        // 起点から [0, 3, 6, 9, 12, 15] 時間後の計6件分を生成
-        const hourlyHtml = [0, 3, 6, 9, 12, 15, 18, 21, 24]
+        // 起点から3時間おき、24時間先までの9件を生成
+        const forecastItems = [0, 3, 6, 9, 12, 15, 18, 21, 24]
             .map((offset) => {
                 const idx = firstIndex + offset;
-                if (idx < 0 || !w.hourly.time[idx]) return "";
+                if (idx < 0 || !w.hourly.time[idx]) return null;
 
                 const d = new Date(w.hourly.time[idx]);
                 const hour = d.getHours();
                 const code = w.hourly.weathercode[idx];
                 const temp = Math.round(w.hourly.temperature_2m[idx]);
+                const precipitationProbability =
+                    w.hourly.precipitation_probability?.[idx];
                 // 予報時間帯が昼(6-18時)か夜かでアイコンを出し分け
                 const isDayTime = hour >= 6 && hour < 18 ? 1 : 0;
 
-                return createWeatherDataHtmlTime(
-                    getGoogleWeatherIcon,
+                return {
                     hour,
                     code,
-                    isDayTime,
-                    wMap,
                     temp,
+                    precipitationProbability,
+                    isDayTime,
+                };
+            })
+            .filter(Boolean);
+
+        const hourlyHtml = forecastItems
+            .map((forecast) => {
+                return createWeatherDataHtmlTime(
+                    getGoogleWeatherIcon,
+                    forecast.hour,
+                    forecast.code,
+                    forecast.isDayTime,
+                    wMap,
+                    forecast.temp,
+                    forecast.precipitationProbability,
                 );
             })
             .join("");
+        const temperatureGraphHtml =
+            createWeatherTemperatureGraphHtml(forecastItems);
+
+        const currentHourIndex = w.hourly.time.findIndex((time) => {
+            const hourlyDate = new Date(time);
+            return (
+                hourlyDate.getFullYear() === now.getFullYear() &&
+                hourlyDate.getMonth() === now.getMonth() &&
+                hourlyDate.getDate() === now.getDate() &&
+                hourlyDate.getHours() === now.getHours()
+            );
+        });
+        const currentPrecipitationProbability =
+            currentHourIndex >= 0
+                ? w.hourly.precipitation_probability?.[currentHourIndex]
+                : null;
 
         // --- スライド1：現在の天気 ＋ 直近6件（18時間分）の予報 ---
         const currentCode = w.current_weather.weathercode;
@@ -530,6 +561,8 @@ function importWeatherData() {
                 currentCode,
                 isDayNow,
                 hourlyHtml,
+                temperatureGraphHtml,
+                currentPrecipitationProbability,
             ),
         );
 
