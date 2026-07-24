@@ -39,7 +39,7 @@ while ($true) {
 
     # --- 1. 気象情報 (Open-Meteo) ---
     try {
-        $w = Invoke-RestMethod -Uri "https://api.open-meteo.com/v1/forecast?latitude=34.65&longitude=135.53&current_weather=true&hourly=temperature_2m,weathercode&daily=weathercode,temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo"
+        $w = Invoke-RestMethod -Uri "https://api.open-meteo.com/v1/forecast?latitude=34.65&longitude=135.53&current_weather=true&hourly=temperature_2m,weathercode,precipitation_probability&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Asia%2FTokyo"
         
         # 【修正点】生成時間を 0 にリセット（内容の比較に影響させないため）
         if ($null -ne $w.generationtime_ms) { $w.generationtime_ms = 0 }
