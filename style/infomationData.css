@@ -51,28 +51,54 @@
 
 /** 3時間ごとの天気予報 */
 .weather_time {
-    padding: 5px;
+    padding: 6px 2px;
     background: rgba(255, 255, 255, 0.05);
-    border-radius: 5px;
+    border-right: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 0;
+    text-align: center;
+    min-width: 0;
 }
 
 /** 予想天気予報の時刻 */
 .weather_time_hour {
-    font-size: 1rem;
+    display: block;
+    font-size: 0.9rem;
     color: var(--snow-gray-text);
 }
 
 /** 3時間ごとの天気の天気予報アイコン */
 .weather_time_icon {
-    width: 55px;
-    height: 55px;
+    display: block;
+    width: 42px;
+    height: 42px;
     margin: 2px 0;
+    margin-left: auto;
+    margin-right: auto;
 }
 
 /** 3時間ごとの天気予報・気温情報 */
 .weather_time_msg {
-    font-size: 1.2rem;
+    display: block;
+    min-height: 2.2em;
+    font-size: 0.85rem;
     font-weight: bold;
+    line-height: 1.1;
+}
+
+.weather_time_temperature {
+    display: block;
+    color: var(--sky-yellow);
+    font-size: 1rem;
+    font-weight: bold;
+    margin-top: 3px;
+}
+
+.weather_precipitation {
+    display: block;
+    color: var(--sky-blue);
+    font-size: 0.78rem;
+    font-weight: bold;
+    margin-top: 2px;
 }
 
 /** 現在の天気 */
@@ -102,6 +128,13 @@
     font-size: 1.8rem;
 }
 
+.weather_precipitation_now {
+    color: var(--sky-blue);
+    font-size: 1.5rem;
+    font-weight: bold;
+    margin-top: 8px;
+}
+
 /** 3時間ごとの天気予報のグリッド表示 */
 .weather_time_grid {
     font-size: 1rem;
@@ -113,8 +146,69 @@
 
 /** グリッドの中の要素 */
 .weather_time_grid_list {
-    grid-template-columns: repeat(3, 1fr);
-    gap: 10px;
+    grid-template-columns: repeat(9, minmax(0, 1fr));
+    gap: 0;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-bottom: 0;
+}
+
+.weather_temperature_graph {
+    position: relative;
+    margin-top: 0;
+    padding-top: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.weather_temperature_graph_label {
+    position: absolute;
+    top: 0;
+    left: 0;
+    color: var(--snow-gray-text);
+    font-size: 0.8rem;
+}
+
+.weather_temperature_graph svg {
+    display: block;
+    width: 100%;
+    height: 500px;
+    overflow: visible;
+}
+
+.weather_temperature_line {
+    fill: none;
+    stroke: var(--sky-yellow);
+    stroke-width: 4;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+}
+
+.weather_temperature_area {
+    fill: url("#weather-temperature-area");
+    opacity: 0.28;
+}
+
+.weather_graph_grid {
+    stroke: rgba(255, 255, 255, 0.12);
+    stroke-width: 1;
+    stroke-dasharray: 4 5;
+}
+
+.weather_temperature_graph circle {
+    fill: var(--sky-yellow);
+    stroke: #000;
+    stroke-width: 2;
+}
+
+.weather_temperature_graph text {
+    fill: var(--snow-white);
+    font-size: 18px;
+    font-weight: bold;
+}
+
+.weather_temperature_graph .weather_graph_axis_label {
+    fill: var(--snow-gray-text);
+    font-size: 12px;
+    font-weight: normal;
 }
 
 /** 明日の天気 */
@@ -159,4 +253,12 @@
 .weather_temperature_min_tomorrow {
     color: var(--sky-blue);
     font-weight: bold;
+}
+
+.weather_precipitation_tomorrow {
+    display: block;
+    color: var(--sky-blue);
+    font-size: 2rem;
+    font-weight: bold;
+    margin-top: 18px;
 }

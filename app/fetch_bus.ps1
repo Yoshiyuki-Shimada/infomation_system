@@ -15,9 +15,13 @@ $userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrom
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-if (-not (Test-Path -LiteralPath $tempDir)) {
-    New-Item -Path $tempDir -ItemType Directory | Out-Null
+function Ensure-TempDirectory {
+    if (-not (Test-Path -LiteralPath $tempDir -PathType Container)) {
+        New-Item -Path $tempDir -ItemType Directory -Force | Out-Null
+    }
 }
+
+Ensure-TempDirectory
 
 while ($true) {
     try {
@@ -35,6 +39,9 @@ while ($true) {
         }
         $json = $payload | ConvertTo-Json -Compress
         $javascript = "registerOnlineBusHtml($json);"
+
+        # ネットワーク監視処理などによりtempが削除されていても再作成する
+        Ensure-TempDirectory
 
         [IO.File]::WriteAllText(
             $temporaryPath,
