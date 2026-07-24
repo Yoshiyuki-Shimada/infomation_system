@@ -203,6 +203,10 @@ html {
     height: 1.5rem;
 }
 
+.delay-status {
+    color: var(--alert-red-bg);
+}
+
 .line-number {
     background-color: var(--sky-blue);
     color: var(--snow-white);

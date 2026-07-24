@@ -163,6 +163,65 @@ function calculateDiff(busTime, now, baseDate) {
     };
 }
 
+function getBusRemovalTime(bus) {
+    if (bus.onlineFlg && bus.delayMinutes >= 5 && bus.predictedTime) {
+        return bus.predictedTime;
+    }
+
+    return bus.time;
+}
+
+function calculateRemovalDiff(bus, now, baseDate) {
+    return calculateDiff(getBusRemovalTime(bus), now, baseDate);
+}
+
+function sortBusesByScheduledTime(buses) {
+    return [...buses].sort((a, b) => a.time.localeCompare(b.time));
+}
+
+function normalizeDestinationName(value) {
+    return String(value || "")
+        .replace(/\s+/g, "")
+        .replace(/行$/, "");
+}
+
+function getBusDestination(bus) {
+    if (bus.onlineDest) return normalizeDestinationName(bus.onlineDest);
+
+    const routeInfo = routeMaster[`${bus.line}_${bus.dir}`];
+    return normalizeDestinationName(routeInfo?.dest);
+}
+
+function doesOfflineLastBusMatch(onlineBus, offlineBus) {
+    return (
+        offlineBus.lastFlg === true &&
+        onlineBus.time === offlineBus.time &&
+        String(onlineBus.line) === String(offlineBus.line) &&
+        getBusDestination(onlineBus) === getBusDestination(offlineBus)
+    );
+}
+
+function inheritOfflineLastFlags(onlineSchedule, offlineSchedule) {
+    const groupNames = ["oikebashi", "kumata", "abenobashi"];
+    const result = {};
+
+    for (const groupName of groupNames) {
+        const offlineBuses = offlineSchedule[groupName] || [];
+        result[groupName] = (onlineSchedule[groupName] || []).map(
+            (onlineBus) => ({
+                ...onlineBus,
+                lastFlg:
+                    onlineBus.lastFlg ||
+                    offlineBuses.some((offlineBus) =>
+                        doesOfflineLastBusMatch(onlineBus, offlineBus),
+                    ),
+            }),
+        );
+    }
+
+    return result;
+}
+
 /**
  * 画面更新メイン処理
  */
@@ -175,10 +234,17 @@ function refresh() {
     const opDate = getOperationalDate(now);
     const displaySchedule = getDisplaySchedule(opDate);
     const type = displaySchedule.type;
-    const schedule = displaySchedule.schedule;
+    const onlineSchedule = getCurrentOnlineSchedule(now);
+    const offlineSchedule = displaySchedule.schedule;
+    const schedule = onlineSchedule
+        ? {
+              ...offlineSchedule,
+              ...inheritOfflineLastFlags(onlineSchedule, offlineSchedule),
+          }
+        : offlineSchedule;
 
     document.getElementById("debug-mode").textContent =
-        `● ${displaySchedule.name}`;
+        onlineSchedule ? "● オンラインデータ" : `● ${displaySchedule.name}`;
     const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
     const days = ["日", "月", "火", "水", "木", "金", "土"];
     const dateStr = `${now.getFullYear()}年${String(now.getMonth() + 1).padStart(2, "0")}月${String(now.getDate()).padStart(2, "0")}日（${days[now.getDay()]}）`;
@@ -232,9 +298,9 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
     if (!el) return;
     const pageEl = document.getElementById(id.replace("list-", "page-"));
 
-    const allUpcoming = buses.filter(
-        (bus) => calculateDiff(bus.time, now, opDate).pure_seconds >= 175,
-    ); // 実際に表示に使う「3分より後」のバス
+    const allUpcoming = sortBusesByScheduledTime(buses).filter(
+        (bus) => calculateRemovalDiff(bus, now, opDate).pure_seconds >= 175,
+    ); // 5分以上遅延時は予測時刻、それ以外は定刻の3分前に表示を切り替える
 
     const activeUpcoming = allUpcoming;
 
@@ -243,7 +309,7 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
     let pageIdx = 0; // 15分以内のバスが多い場合はページング
 
     const within15 = activeUpcoming.filter(
-        (bus) => calculateDiff(bus.time, now, opDate).pure_seconds <= 900,
+        (bus) => calculateRemovalDiff(bus, now, opDate).pure_seconds <= 900,
     ); // 15分以内に発車するバスの本数が設定した maxDisplay より多いならページを分割して表示
 
     if (within15.length > maxDisplay) {
@@ -275,7 +341,7 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
 
     el.innerHTML = displayBuses
         .map((bus) => {
-            const diffInfo = calculateDiff(bus.time, now, opDate);
+            const diffInfo = calculateRemovalDiff(bus, now, opDate);
             const pureSeconds = diffInfo.pure_seconds;
 
             // 2分55秒〜2分59秒の間は、このバスの行だけ空欄にする
@@ -294,6 +360,7 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
                 msg1: "",
                 msg2: "",
             };
+            const destination = bus.onlineDest || info.dest;
 
             const diff = calculateDiff(bus.time, now, opDate).minutes;
             const diff_sec = calculateDiff(bus.time, now, opDate).seconds;
@@ -308,6 +375,7 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
             let imgName = "";
             let via_color = "#8c8f93";
             let status_color = "#e02135";
+            const hasMajorDelay = bus.onlineFlg && bus.delayMinutes >= 5;
 
             engText = engModeChange(engMode, info, bus.msg);
 
@@ -315,32 +383,68 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
                 status = "運転休止";
                 imgName = "suspension.png";
             } else {
-                if (diff >= 0 && diff_sec_pure <= 900) {
+                if (
+                    (diff >= 0 || hasMajorDelay) &&
+                    calculateRemovalDiff(bus, now, opDate).pure_seconds <= 900
+                ) {
                     // テキストの出し分け
-                    if (isTimeMode) {
+                    const delayedCycle = Math.floor(
+                        (now.getTime() / 1000) % 12,
+                    );
+                    const scheduledSecondsForDisplay = Math.max(
+                        0,
+                        diff_sec_pure,
+                    );
+                    const scheduledDiffForDisplay = {
+                        minutes: Math.floor(scheduledSecondsForDisplay / 60),
+                        seconds: scheduledSecondsForDisplay % 60,
+                    };
+                    const wouldGiveUp = diff_sec_pure <= 270;
+                    const showDelay =
+                        hasMajorDelay &&
+                        (delayedCycle >= 8 ||
+                            (wouldGiveUp && delayedCycle >= 4));
+                    const showStatus =
+                        hasMajorDelay &&
+                        !wouldGiveUp &&
+                        delayedCycle >= 4 &&
+                        delayedCycle < 8;
+
+                    if (showDelay) {
+                        status = bus.lastFlg ? "最終" : bus.delayText;
+                        status_color = "#e02135";
+                    } else if (showStatus) {
+                        statusResult = getTravelStatus(
+                            diff,
+                            diff_sec_pure,
+                            true,
+                        );
+                        status = statusResult.text;
+                        status_color = statusResult.color;
+                    } else if (isTimeMode || hasMajorDelay) {
                         statusResult = visibleTime(
                             isLastMode,
                             bus.lastFlg,
-                            diff,
-                            diff_sec,
-                            diff_sec_pure,
+                            scheduledDiffForDisplay.minutes,
+                            scheduledDiffForDisplay.seconds,
+                            scheduledSecondsForDisplay,
+                            hasMajorDelay,
                         );
                         status = statusResult.text;
                         status_color = statusResult.color;
                     } else {
-                        status_color = "#ffe766";
-                        if (diff_sec_pure <= 270) {
-                            status = "諦めましょう";
-                            status_color = "#e02135";
-                        } else if (diff <= 7) {
-                            status = "走ったら間に合う";
-                            status_color = "#ee7b1a";
-                        } else if (diff <= 8) status = "早歩きで間に合う";
-                        else status = "歩いても間に合う";
+                        statusResult = getTravelStatus(
+                            diff,
+                            diff_sec_pure,
+                            false,
+                        );
+                        status = statusResult.text;
+                        status_color = statusResult.color;
                     }
 
                     // 15分以内のときの表示アイコン
-                    if (diff_sec_pure <= 270) imgName = "missed.png";
+                    if (diff_sec_pure <= 270 && !hasMajorDelay)
+                        imgName = "missed.png";
                     else if (diff <= 7) imgName = "run.png";
                     else if (diff <= 8) imgName = "walk_fast.png";
                     else imgName = "walk.png";
@@ -375,14 +479,14 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
                 <div class="bus-row">
                     <div class="time-block">
                         <div class="scheduled-time">${bus.time}</div>
-                        <div class="status" style="color: ${status_color};">${status}</div>
+                        <div class="status${hasMajorDelay && status === bus.delayText ? " delay-status" : ""}" style="color: ${status_color};">${status}</div>
                     </div>
 
                     <div class="line-number">${bus.line}</div>
 
                     <div class="destination-info">
                         <div class="via">${info.via || "&nbsp;"}</div>
-                        <div class="destination">${info.dest}</div>
+                        <div class="destination">${destination}</div>
                         <div class="via eng-sub" style="color: ${via_color};">${engText || "&nbsp;"}</div>
                     </div>
 
@@ -393,11 +497,33 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
         .join("");
 }
 
-function visibleTime(isLastMode, lastFlg, diff, diff_sec, diff_sec_pure) {
+function getTravelStatus(diff, diff_sec_pure, suppressGiveUp) {
+    if (diff_sec_pure <= 270) {
+        return suppressGiveUp
+            ? { text: "", color: "#e02135" }
+            : { text: "諦めましょう", color: "#e02135" };
+    }
+    if (diff <= 7) {
+        return { text: "走ったら間に合う", color: "#ee7b1a" };
+    }
+    if (diff <= 8) {
+        return { text: "早歩きで間に合う", color: "#ffe766" };
+    }
+    return { text: "歩いても間に合う", color: "#ffe766" };
+}
+
+function visibleTime(
+    isLastMode,
+    lastFlg,
+    diff,
+    diff_sec,
+    diff_sec_pure,
+    suppressLast = false,
+) {
     const displayMinutes = String(diff).padStart(2, "\u00A0");
     const displaySeconds = String(diff_sec).padStart(2, "0");
 
-    if (lastFlg && isLastMode) {
+    if (lastFlg && isLastMode && !suppressLast) {
         return {
             text: "最終",
             color: "#e02135",
