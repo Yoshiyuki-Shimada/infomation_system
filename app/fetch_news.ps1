@@ -43,6 +43,64 @@ while ($true) {
         
         # 【修正点】生成時間を 0 にリセット（内容の比較に影響させないため）
         if ($null -ne $w.generationtime_ms) { $w.generationtime_ms = 0 }
+
+        try {
+            $jma = Invoke-RestMethod -Uri "https://www.jma.go.jp/bosai/forecast/data/forecast/270000.json"
+            $popSeries = $jma[0].timeSeries | Where-Object { $_.areas[0].pops } | Select-Object -First 1
+
+            if ($popSeries) {
+                $jmaTimeDefines = @($popSeries.timeDefines)
+                $jmaPops = @($popSeries.areas[0].pops)
+                $hourlyTimes = @($w.hourly.time)
+                $hourlyPops = @($w.hourly.precipitation_probability)
+
+                for ($i = 0; $i -lt $hourlyTimes.Count; $i++) {
+                    $hourlyDate = [datetime]::Parse($hourlyTimes[$i])
+
+                    for ($j = 0; $j -lt $jmaTimeDefines.Count; $j++) {
+                        $start = [datetimeoffset]::Parse($jmaTimeDefines[$j]).DateTime
+                        if ($j + 1 -lt $jmaTimeDefines.Count) {
+                            $end = [datetimeoffset]::Parse($jmaTimeDefines[$j + 1]).DateTime
+                        }
+                        else {
+                            $end = $start.AddHours(6)
+                        }
+
+                        if ($hourlyDate -ge $start -and $hourlyDate -lt $end) {
+                            $hourlyPops[$i] = [int]$jmaPops[$j]
+                            break
+                        }
+                    }
+                }
+
+                $w.hourly.precipitation_probability = $hourlyPops
+
+                if ($w.daily -and $w.daily.time -and $w.daily.precipitation_probability_max) {
+                    $dailyPops = @($w.daily.precipitation_probability_max)
+                    for ($d = 0; $d -lt $w.daily.time.Count; $d++) {
+                        $targetDate = [datetime]::Parse($w.daily.time[$d]).Date
+                        $values = @()
+
+                        for ($j = 0; $j -lt $jmaTimeDefines.Count; $j++) {
+                            $start = [datetimeoffset]::Parse($jmaTimeDefines[$j]).DateTime
+                            if ($start.Date -eq $targetDate) {
+                                $values += [int]$jmaPops[$j]
+                            }
+                        }
+
+                        if ($values.Count -gt 0) {
+                            $dailyPops[$d] = ($values | Measure-Object -Maximum).Maximum
+                        }
+                    }
+                    $w.daily.precipitation_probability_max = $dailyPops
+                }
+
+                Write-Host " 天気降水確率：気象庁データで補正" -ForegroundColor Green
+            }
+        }
+        catch {
+            Write-Host " 天気降水確率：気象庁補正失敗・Open-Meteo値を使用" -ForegroundColor Yellow
+        }
         
         $data.weather = $w
         Write-Host " 天気取得：処理済み" -ForegroundColor Green
@@ -291,63 +349,49 @@ while ($true) {
     catch { Write-Host " 避難情報取得：失敗・処理中断" -ForegroundColor Red }
 
     # --- 比較と保存のロジック ---
-    
     $oldData = $null
-    $shouldUpdateTimestamp = $true
-
-    # 1. 既存のファイル（news_data.js）を読み込んでオブジェクトに戻す
-    # --- 比較と保存のロジック ---
-    
-    $oldData = $null
-    $shouldUpdateTimestamp = $true
+    $hasChanged = $true
 
     if (Test-Path $filePath) {
         try {
             $rawContent = Get-Content $filePath -Raw
             if ($rawContent -match 'var signageData = (\{.*\});') {
                 $oldData = $Matches[1] | ConvertFrom-Json
-                
-                # 【修正点】古いデータの生成時間も 0 にして、今回のデータと比較条件を揃える
+
                 if ($oldData.weather -and $null -ne $oldData.weather.generationtime_ms) {
                     $oldData.weather.generationtime_ms = 0
                 }
             }
         }
-        catch { }
-    }
-
-    # 2. 内容の比較
-    if ($oldData -ne $null) {
-        # updateTime 以外の項目を JSON 文字列にして比較
-        $currentCompareJson = $data | ConvertTo-Json -Depth 10 -Compress
-        $oldCompareJson = $oldData | Select-Object * -ExcludeProperty updateTime | ConvertTo-Json -Depth 10 -Compress
-
-        if ($currentCompareJson -eq $oldCompareJson) {
-            # 中身が全く同じなら、前回の時刻をそのまま使う
-            $data.updateTime = $oldData.updateTime
-            $shouldUpdateTimestamp = $false
-            Write-Host " [System] データに変更がないため、更新時刻を維持します。" -ForegroundColor Yellow
+        catch {
+            Write-Host " [System] 前回データの読み込みに失敗したため、更新します。" -ForegroundColor Yellow
         }
     }
 
-    # 3. 変更があった場合のみ、現在の時刻をセット
-    if ($shouldUpdateTimestamp) {
+    if ($oldData -ne $null) {
+        $currentCompareJson = $data | Select-Object * -ExcludeProperty updateTime | ConvertTo-Json -Depth 10 -Compress
+        $oldCompareJson = $oldData | Select-Object * -ExcludeProperty updateTime | ConvertTo-Json -Depth 10 -Compress
+
+        if ($currentCompareJson -eq $oldCompareJson) {
+            $hasChanged = $false
+            Write-Host " [System] 取得データに変更なし。news_data.js は更新しません。" -ForegroundColor Yellow
+        }
+    }
+
+    if ($hasChanged) {
         $data.updateTime = (Get-Date -Format "yyyy/MM/dd HH:mm")
         Write-Host " [System] 新しいデータを検知しました。" -ForegroundColor Cyan
+
+        if (-not (Test-Path $tempDir)) {
+            New-Item -Path $tempDir -ItemType Directory | Out-Null
+            Write-Host " [System] temp フォルダを自動作成しました。" -ForegroundColor Yellow
+        }
+
+        $json = $data | ConvertTo-Json -Depth 10
+        "var signageData = $json;" | Out-File -FilePath $filePath -Encoding utf8 -Force
+
+        Write-Host "$(Get-Date -Format 'HH:mm:ss') news_data.js を更新しました。($filePath)" -ForegroundColor Cyan
     }
-
-
-    # tempフォルダーがない場合の自動作成
-    if (-not (Test-Path $tempDir)) {
-        New-Item -Path $tempDir -ItemType Directory | Out-Null
-        Write-Host " [System] temp フォルダを自動作成しました。" -ForegroundColor Yellow
-    }
-
-    # JSON形式に変換して保存
-    $json = $data | ConvertTo-Json -Depth 10
-    "var signageData = $json;" | Out-File -FilePath $filePath -Encoding utf8 -Force
-
-    Write-Host "$(Get-Date -Format 'HH:mm:ss') news_data.js を更新しました。($filePath)" -ForegroundColor Cyan
     # 5分ごとの情報取得
     Start-Sleep -Seconds 300
 }
