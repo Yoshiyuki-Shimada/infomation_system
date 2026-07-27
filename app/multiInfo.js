@@ -456,6 +456,15 @@ function importWeatherData() {
             return `https://maps.gstatic.com/weather/v1/${name}_dark.svg`;
         };
 
+        const getDisplayWeatherCode = (code, precipitationProbability) => {
+            const probability = Number(precipitationProbability);
+            if (!Number.isFinite(probability)) return code;
+
+            if (probability >= 70 && code >= 0 && code <= 3) return 61;
+            if (probability >= 50 && code >= 0 && code <= 2) return 3;
+
+            return code;
+        };
         // 日本語天気名マップ
         const wMap = {
             0: "晴れ",
@@ -503,10 +512,14 @@ function importWeatherData() {
 
                 const d = new Date(w.hourly.time[idx]);
                 const hour = d.getHours();
-                const code = w.hourly.weathercode[idx];
+                const rawCode = w.hourly.weathercode[idx];
                 const temp = Math.round(w.hourly.temperature_2m[idx]);
                 const precipitationProbability =
                     w.hourly.precipitation_probability?.[idx];
+                const code = getDisplayWeatherCode(
+                    rawCode,
+                    precipitationProbability,
+                );
                 // 予報時間帯が昼(6-18時)か夜かでアイコンを出し分け
                 const isDayTime = hour >= 6 && hour < 18 ? 1 : 0;
 
