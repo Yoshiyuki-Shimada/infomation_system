@@ -44,6 +44,7 @@ function Play-Sound {
 
 # 二重再生防止
 $lastPlayedMinute = -1
+$announceTimeAtOtherTenMinutes = $false
 
 function Start-Time-Signal {
     $now = Get-Date
@@ -51,13 +52,9 @@ function Start-Time-Signal {
     $minute = $now.Minute
     $second = $now.Second
 
-    # 秒ピッタリ（少し余裕持たせてもOKなら <=1 にしてもいい）
     if ($second -ne 0) { return }
-
-    # 10分単位のみ
     if ($minute % 10 -ne 0) { return }
 
-    # 二重再生防止
     if ($minute -eq $lastPlayedMinute) { return }
     $script:lastPlayedMinute = $minute
 
@@ -67,41 +64,46 @@ function Start-Time-Signal {
     $hourPath = Join-Path $basePath "hour_24h"
     $minPath = Join-Path $basePath "minutes_24h"
 
-    # ファイルパス
     $titleJustSound = Join-Path $hourPath "time_signal_just_title_sound.mp3"
+    $title30Sound = Join-Path $hourPath "time_signal_30_title_sound.mp3"
     $titleSound = Join-Path $hourPath "time_signal_title_sound.mp3"
     $titleVoice = Join-Path $hourPath "time_signal_title_voice.mp3"
 
-
-
-    # 正時
     if ($minute -eq 0) {
-        # ① ピロリン
         Play-Sound $titleJustSound
-
-        # ② 時刻は
         Play-Sound $titleVoice
+
         $hourFile = Join-Path $hourPath "time_signal_${hour}_hour_just.mp3"
         Write-Output "時:$hourFile"
         Play-Sound $hourFile
+        return
     }
-    else {
-        # ① ピロリン
-        Play-Sound $titleSound
 
-        # ② 時刻は
+    $hourFile = Join-Path $hourPath "time_signal_${hour}_hour.mp3"
+    $minFile = Join-Path $minPath "time_signal_${minute}_min.mp3"
+
+    if ($minute -eq 30) {
+        Play-Sound $title30Sound
         Play-Sound $titleVoice
-        $hourFile = Join-Path $hourPath "time_signal_${hour}_hour.mp3"
-        $minFile = Join-Path $minPath "time_signal_${minute}_min.mp3"
 
         Write-Output "時:$hourFile"
         Write-Output "分:$minFile"
+        Play-Sound $hourFile
+        Play-Sound $minFile
+        return
+    }
 
+    Play-Sound $titleSound
+
+    if ($announceTimeAtOtherTenMinutes) {
+        Play-Sound $titleVoice
+
+        Write-Output "時:$hourFile"
+        Write-Output "分:$minFile"
         Play-Sound $hourFile
         Play-Sound $minFile
     }
 }
-
 # メインループ（秒同期）
 while ($true) {
     Start-Time-Signal

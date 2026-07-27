@@ -183,8 +183,8 @@
 }
 
 .weather_temperature_area {
-    fill: url("#weather-temperature-area");
-    opacity: 0.28;
+    fill: var(--imazato-orange);
+    opacity: 0.32;
 }
 
 .weather_graph_grid {

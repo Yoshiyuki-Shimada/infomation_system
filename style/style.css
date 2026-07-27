@@ -515,9 +515,12 @@ html {
     background-color: rgba(255, 255, 255, 0.1);
 }
 
+.char-icon-status,
 .char-icon-suspension {
     border-radius: 0;
-    border: 0px;
+    object-fit: contain;
+    border: 0;
+    background-color: transparent;
 }
 
 /* ページ番号のスタイルを調整 */
