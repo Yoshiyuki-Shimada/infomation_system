@@ -175,8 +175,17 @@ function calculateRemovalDiff(bus, now, baseDate) {
     return calculateDiff(getBusRemovalTime(bus), now, baseDate);
 }
 
-function sortBusesByScheduledTime(buses) {
-    return [...buses].sort((a, b) => a.time.localeCompare(b.time));
+function getBusSortTime(bus) {
+    return bus.predictedTime || bus.time;
+}
+
+function sortBusesByDisplayTime(buses, now, baseDate) {
+    return [...buses].sort((a, b) => {
+        const diffA = calculateDiff(getBusSortTime(a), now, baseDate).pure_seconds;
+        const diffB = calculateDiff(getBusSortTime(b), now, baseDate).pure_seconds;
+        if (diffA !== diffB) return diffA - diffB;
+        return a.time.localeCompare(b.time);
+    });
 }
 
 function normalizeDestinationName(value) {
@@ -293,12 +302,39 @@ function refresh() {
 /**
  * バス路線のリストを表示（画像表示対応版）
  */
+function pickBusDisplayInfo(
+    cycleSeconds,
+    remainingInfo,
+    delayInfo,
+    statusInfo,
+    lastInfo,
+    suspensionInfo,
+) {
+    if (cycleSeconds < 7) {
+        if (remainingInfo && delayInfo) {
+            return cycleSeconds < 4 ? remainingInfo : delayInfo;
+        }
+        return remainingInfo || delayInfo || lastInfo || suspensionInfo || statusInfo;
+    }
+
+    const statusInfos = [statusInfo, lastInfo, suspensionInfo].filter(Boolean);
+    if (statusInfos.length === 2) {
+        return cycleSeconds < 9 ? statusInfos[0] : statusInfos[1];
+    }
+    if (statusInfos.length > 2) {
+        if (cycleSeconds < 9) return statusInfos[0];
+        if (cycleSeconds < 10.5) return statusInfos[1];
+        return statusInfos[2];
+    }
+
+    return statusInfo || lastInfo || suspensionInfo || delayInfo || remainingInfo;
+}
 function renderBusList(id, buses, now, opDate, maxDisplay) {
     const el = document.getElementById(id);
     if (!el) return;
     const pageEl = document.getElementById(id.replace("list-", "page-"));
 
-    const allUpcoming = sortBusesByScheduledTime(buses).filter(
+    const allUpcoming = sortBusesByDisplayTime(buses, now, opDate).filter(
         (bus) => calculateRemovalDiff(bus, now, opDate).pure_seconds >= 175,
     ); // 5分以上遅延時は予測時刻、それ以外は定刻の3分前に表示を切り替える
 
@@ -368,135 +404,117 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
                 opDate,
             ).pure_seconds;
 
-            let statusResult = "";
             let status = "";
             let imgName = "";
             let via_color = "#8c8f93";
             let status_color = "#e02135";
-            const hasMajorDelay = bus.onlineFlg && bus.delayMinutes >= 5;
+            const hasMajorDelay = bus.onlineFlg && Number(bus.delayMinutes) >= 5;
+            const predictedSeconds = pureSeconds;
+            const delayStatusInfo =
+                hasMajorDelay && bus.delayText
+                    ? { text: bus.delayText, color: "#e02135" }
+                    : null;
+            const lastInfo = bus.lastFlg
+                ? { text: "\u6700\u7d42", color: "#e02135" }
+                : null;
+            const suspensionInfo = bus.suspensionFlg
+                ? { text: "\u904b\u8ee2\u4f11\u6b62", color: "#e02135" }
+                : null;
+            const isWithinDetailWindow =
+                (diff >= 0 || hasMajorDelay) && diff_sec_pure < 900;
+            const isScheduledInSoonWindow =
+                hasMajorDelay && diff_sec_pure <= 270;
+            const predictionWithinSevenMinutes = predictedSeconds <= 420;
+            const showSoon =
+                isScheduledInSoonWindow && predictionWithinSevenMinutes;
+            const delayOnly =
+                isScheduledInSoonWindow && !predictionWithinSevenMinutes;
 
             engText = engModeChange(engMode, info, bus.msg);
 
-            if (bus.suspensionFlg) {
-                status = "運転休止";
-                imgName = "suspension.png";
-            } else {
-                if (
-                    (diff >= 0 || hasMajorDelay) &&
-                    diff_sec_pure < 900
-                ) {
-                    const scheduledSecondsForDisplay = Math.max(
-                        0,
-                        diff_sec_pure,
-                    );
-                    const scheduledDiffForDisplay = {
-                        minutes: Math.floor(scheduledSecondsForDisplay / 60),
-                        seconds: scheduledSecondsForDisplay % 60,
-                    };
-                    const scheduledUnderThreeMinutes =
-                        hasMajorDelay && diff_sec_pure < 180;
-                    const predictedSeconds =
-                        calculateRemovalDiff(
-                            bus,
-                            now,
-                            opDate,
-                        ).pure_seconds;
-                    const predictionWithinSevenMinutes =
-                        predictedSeconds <= 420;
-                    const showSoon =
-                        scheduledUnderThreeMinutes &&
-                        predictionWithinSevenMinutes;
-                    const delayOnly =
-                        scheduledUnderThreeMinutes &&
-                        !predictionWithinSevenMinutes;
-                    const remainingResult = visibleTime(
-                        false,
-                        bus.lastFlg,
-                        scheduledDiffForDisplay.minutes,
-                        scheduledDiffForDisplay.seconds,
-                        scheduledSecondsForDisplay,
-                        hasMajorDelay,
-                    );
-                    const remainingInfo =
-                        diff_sec_pure >= 0 && !delayOnly && !showSoon
-                            ? {
-                                  text: remainingResult.text,
-                                  color: remainingResult.color,
-                              }
-                            : null;
-                    const delayInfo =
-                        hasMajorDelay && bus.delayText
-                            ? { text: bus.delayText, color: "#e02135" }
-                            : null;
-                    const travelResult = getTravelStatus(
-                        diff,
-                        diff_sec_pure,
-                        hasMajorDelay,
-                    );
-                    const statusInfo =
-                        showSoon
-                            ? { text: "まもなく", color: "#ee7b1a" }
-                            : travelResult.text
-                              ? {
-                                    text: travelResult.text,
-                                    color: travelResult.color,
-                                }
-                              : null;
-                    const lastInfo = bus.lastFlg
-                        ? { text: "最終", color: "#e02135" }
+            let displayInfo = null;
+            let statusInfo = null;
+
+            if (isWithinDetailWindow) {
+                const scheduledSecondsForDisplay = Math.max(0, diff_sec_pure);
+                const scheduledDiffForDisplay = {
+                    minutes: Math.floor(scheduledSecondsForDisplay / 60),
+                    seconds: scheduledSecondsForDisplay % 60,
+                };
+                const remainingResult = visibleTime(
+                    false,
+                    bus.lastFlg,
+                    scheduledDiffForDisplay.minutes,
+                    scheduledDiffForDisplay.seconds,
+                    scheduledSecondsForDisplay,
+                    hasMajorDelay,
+                );
+                const remainingInfo =
+                    !suspensionInfo &&
+                    diff_sec_pure >= 0 &&
+                    !delayOnly &&
+                    !showSoon
+                        ? {
+                              text: remainingResult.text,
+                              color: remainingResult.color,
+                          }
                         : null;
+                const delayInfo = delayStatusInfo;
+                const travelResult = getTravelStatus(
+                    diff,
+                    diff_sec_pure,
+                    hasMajorDelay,
+                );
+                statusInfo =
+                    !suspensionInfo && showSoon
+                        ? { text: "\u307e\u3082\u306a\u304f", color: "#ee7b1a" }
+                        : !suspensionInfo && travelResult.text
+                          ? {
+                                text: travelResult.text,
+                                color: travelResult.color,
+                            }
+                          : null;
 
-                    let displayInfo = null;
+                displayInfo = pickBusDisplayInfo(
+                    cycleSeconds,
+                    remainingInfo,
+                    delayInfo,
+                    statusInfo,
+                    lastInfo,
+                    suspensionInfo,
+                );
 
-                    if (cycleSeconds < 7) {
-                        // 時間関係の7秒枠。両方ある場合だけ4秒＋3秒に分割。
-                        if (remainingInfo && delayInfo) {
-                            displayInfo =
-                                cycleSeconds < 4
-                                    ? remainingInfo
-                                    : delayInfo;
-                        } else {
-                            displayInfo =
-                                remainingInfo ||
-                                delayInfo ||
-                                lastInfo ||
-                                statusInfo;
-                        }
-                    } else {
-                        // ステータス関係の5秒枠。両方ある場合だけ2秒＋3秒に分割。
-                        if (statusInfo && lastInfo) {
-                            displayInfo =
-                                cycleSeconds < 9
-                                    ? statusInfo
-                                    : lastInfo;
-                        } else {
-                            // 空き枠は、存在する情報で埋める。
-                            displayInfo =
-                                statusInfo ||
-                                lastInfo ||
-                                delayInfo ||
-                                remainingInfo;
-                        }
-                    }
+            } else {
+                displayInfo = pickBusDisplayInfo(
+                    cycleSeconds,
+                    null,
+                    delayStatusInfo,
+                    null,
+                    lastInfo,
+                    suspensionInfo,
+                );
 
-                    if (displayInfo) {
-                        status = displayInfo.text;
-                        status_color = displayInfo.color;
-                    }
 
-                    // 15分以内のときの表示アイコン
-                    if (diff_sec_pure <= 270 && !hasMajorDelay)
-                        imgName = "missed.png";
-                    else if (diff <= 7) imgName = "run.png";
-                    else if (diff <= 8) imgName = "walk_fast.png";
-                    else imgName = "walk.png";
-                } else {
-                    if (bus.lastFlg) {
-                        status = "最終";
-                    }
-                }
             }
 
+            if (displayInfo) {
+                status = displayInfo.text;
+                status_color = displayInfo.color;
+            }
+
+            if (bus.suspensionFlg) {
+                imgName = "suspension.png";
+            } else if (showSoon) {
+                imgName = "delay.png";
+            } else if (delayOnly) {
+                imgName = "infomation.png";
+            } else if (isWithinDetailWindow) {
+                if (diff_sec_pure <= 270 && !hasMajorDelay)
+                    imgName = "missed.png";
+                else if (diff <= 7) imgName = "run.png";
+                else if (diff <= 8) imgName = "walk_fast.png";
+                else imgName = "walk.png";
+            }
             if (
                 engMode == engVisible.bus_msg &&
                 bus.msg &&
@@ -509,8 +527,13 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
                 via_color = "#8c8f93";
             }
 
-            const charIconClass = bus.suspensionFlg
-                ? "char-icon char-icon-suspension"
+            const uncroppedIconNames = [
+                "suspension.png",
+                "delay.png",
+                "infomation.png",
+            ];
+            const charIconClass = uncroppedIconNames.includes(imgName)
+                ? "char-icon char-icon-status"
                 : "char-icon";
 
             const charHtml = imgName

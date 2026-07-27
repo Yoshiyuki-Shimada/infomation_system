@@ -319,13 +319,6 @@ function createWeatherTemperatureGraphHtml(forecastItems) {
         <div class="weather_temperature_graph">
             <div class="weather_temperature_graph_label">気温推移</div>
             <svg viewBox="0 0 ${graphWidth} ${graphHeight}" preserveAspectRatio="none" role="img" aria-label="3時間ごとの気温グラフ。縦軸${axisMinTemperature}度から${axisMaxTemperature}度">
-                <defs>
-                    <linearGradient id="weather-temperature-area" x1="0" y1="0" x2="1" y2="0">
-                        <stop offset="0%" stop-color="#ff4a5a"></stop>
-                        <stop offset="55%" stop-color="#ffe766"></stop>
-                        <stop offset="100%" stop-color="#ff4a5a"></stop>
-                    </linearGradient>
-                </defs>
                 ${verticalGrid}
                 ${horizontalGrid}
                 ${axisLabels}
