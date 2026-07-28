@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="ja">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>いまざとライナー時刻案内</title>
+        <link rel="stylesheet" href="style/style.css" />
+        <link rel="stylesheet" href="style/imazato-liner.css" />
+    </head>
+    <body class="imazato-screen">
+        <main class="container">
+            <section class="info-panel liner-display-panel">
+                <header class="header">
+                    <div>
+                        <span>大池橋</span>
+                        <span class="stop-name-en">Oikebashi</span>
+                    </div>
+                    <div class="liner-online-status">判定中...</div>
+                </header>
+
+                <section class="bus-section liner-bus-section">
+                    <div class="direction-bar liner-direction-bar">
+                        <div class="direction-text-group">
+                            <span
+                                >いまざとライナー　地下鉄今里・神路公園方面</span
+                            >
+                            <span class="eng-sub"
+                                >Imazato Liner　For Subway Imazato /
+                                Kamiji-koen</span
+                            >
+                        </div>
+                    </div>
+                    <div
+                        class="bus-list liner-bus-list"
+                        id="list-oikebashi-north"
+                    ></div>
+                </section>
+
+                <section class="bus-section liner-bus-section">
+                    <div class="direction-bar liner-direction-bar">
+                        <div class="direction-text-group">
+                            <span
+                                >いまざとライナー　杭全・長居・あべの橋方面</span
+                            >
+                            <span class="eng-sub"
+                                >Imazato Liner　For Kumata / Nagai /
+                                Abenobashi</span
+                            >
+                        </div>
+                    </div>
+                    <div
+                        class="bus-list liner-bus-list"
+                        id="list-oikebashi-south"
+                    ></div>
+                </section>
+            </section>
+
+            <section class="info-panel liner-display-panel liner-right-panel">
+                <header class="header">
+                    <div>
+                        <span>田島五丁目</span>
+                        <span class="stop-name-en">Tajima 5-chome</span>
+                    </div>
+                    <div class="liner-online-status">判定中...</div>
+                </header>
+
+                <section class="bus-section liner-bus-section">
+                    <div class="direction-bar liner-direction-bar">
+                        <div class="direction-text-group">
+                            <span
+                                >いまざとライナー　大池橋・地下鉄今里・神路公園方面</span
+                            >
+                            <span class="eng-sub"
+                                >Imazato Liner　For Oikebashi / Subway
+                                Imazato / Kamiji-koen</span
+                            >
+                        </div>
+                    </div>
+                    <div
+                        class="bus-list liner-bus-list"
+                        id="list-tajima-north"
+                    ></div>
+                </section>
+
+                <section class="bus-section liner-bus-section">
+                    <div class="direction-bar liner-direction-bar">
+                        <div class="direction-text-group">
+                            <span
+                                >いまざとライナー　杭全・長居・あべの橋方面</span
+                            >
+                            <span class="eng-sub"
+                                >Imazato Liner　For Kumata / Nagai /
+                                Abenobashi</span
+                            >
+                        </div>
+                    </div>
+                    <div
+                        class="bus-list liner-bus-list"
+                        id="list-tajima-south"
+                    ></div>
+                </section>
+            </section>
+        </main>
+
+        <script src="app/imazato-liner.js"></script>
+    </body>
+</html>

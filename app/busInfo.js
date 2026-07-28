@@ -244,6 +244,10 @@ function refresh() {
     const displaySchedule = getDisplaySchedule(opDate);
     const type = displaySchedule.type;
     const onlineSchedule = getCurrentOnlineSchedule(now);
+    const onlineFetchedAt = onlineSchedule ? getOnlineBusFetchedAt() : null;
+    const onlinePollIntervalSeconds = onlineSchedule
+        ? getOnlineBusPollIntervalSeconds()
+        : null;
     const offlineSchedule = displaySchedule.schedule;
     const schedule = onlineSchedule
         ? {
@@ -252,8 +256,17 @@ function refresh() {
           }
         : offlineSchedule;
 
+    const onlineUpdateTime = onlineFetchedAt
+        ? `${String(onlineFetchedAt.getHours()).padStart(2, "0")}:${String(onlineFetchedAt.getMinutes()).padStart(2, "0")}`
+        : "";
+    const isOutsideOnlineServiceHours =
+        now.getHours() >= 1 && now.getHours() < 5;
     document.getElementById("debug-mode").textContent =
-        onlineSchedule ? "● オンラインデータ" : `● ${displaySchedule.name}`;
+        isOutsideOnlineServiceHours
+            ? "● オンラインデータ（情報提供時間外）"
+            : onlineSchedule
+              ? `● オンラインデータ（${onlineUpdateTime}更新・${onlinePollIntervalSeconds}秒間隔更新）`
+              : `● ${displaySchedule.name}`;
     const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
     const days = ["日", "月", "火", "水", "木", "金", "土"];
     const dateStr = `${now.getFullYear()}年${String(now.getMonth() + 1).padStart(2, "0")}月${String(now.getDate()).padStart(2, "0")}日（${days[now.getDay()]}）`;
@@ -266,37 +279,7 @@ function refresh() {
     // --- バス路線の描画 ---
     renderBusList("list-oikebashi", schedule.oikebashi || [], now, opDate, 3); // 守口車庫前・なんば方面（3本）
     renderBusList("list-kumata", schedule.kumata || [], now, opDate, 2); // 杭全・出戸バスターミナル方面（2本・新規追加）
-    renderBusList("list-abenobashi", schedule.abenobashi || [], now, opDate, 1); // あべの橋方面（1本）
-
-    // --- いまざとライナーの10秒切り替え表示 ---
-    const seconds = Math.floor(now.getTime() / 1000);
-    const isAbenoMode = Math.floor(seconds / 10) % 2 === 1; // 10秒おきに切替
-
-    // 出発10分前より後のバスを表示対象とするフィルタ
-    const filterLiner = (bus) =>
-        calculateDiff(bus.time, now, opDate).minutes >= 10;
-
-    if (isAbenoMode) {
-        updateLinerHeader(
-            "いまざとライナー　杭全・あべの橋方面（あべの橋行きのみ表示）",
-            "Imazato Liner　For Kumata / Abenobashi",
-        );
-        renderLinerList(
-            (schedule.liner_abeno || []).filter(filterLiner).slice(0, 2),
-            "あべの橋行き",
-            "abeno",
-        );
-    } else {
-        updateLinerHeader(
-            "いまざとライナー　地下鉄今里・神路公園方面",
-            "Imazato Liner　For Subway Imazato / Kamiji-koen",
-        );
-        renderLinerList(
-            (schedule.liner_imazato || []).filter(filterLiner).slice(0, 2),
-            "地下鉄今里・神路公園方面行き",
-            "imazato",
-        );
-    }
+    renderBusList("list-abenobashi", schedule.abenobashi || [], now, opDate, 2); // あべの橋方面（2本）
 }
 
 /**
@@ -647,38 +630,4 @@ function engModeChange(engMode, info, bus_msg) {
             break;
     }
     return ans;
-}
-
-// ヘッダーテキストを書き換える関数（新規）
-function updateLinerHeader(jp, en) {
-    const header = document.getElementById("liner-header");
-    header.innerHTML = `<span>${jp}</span><span class="eng-sub">${en}</span>`;
-}
-
-/**
- * いまざとライナーのリストを表示する
- * @param {string} mode - 'imazato' または 'abeno'
- */
-function renderLinerList(buses, directionLabel, mode) {
-    const el = document.getElementById("list-liner");
-    if (!buses || buses.length === 0) {
-        el.innerHTML =
-            '<div class="no-bus no-liner">★ 本日のバスは終了しました ★</div>';
-        return;
-    }
-
-    // モードに応じて駅名を固定で割り当て
-    const s1 = mode === "imazato" ? "田島五丁目" : "大池橋";
-    const s2 = mode === "imazato" ? "大池橋" : "田島五丁目";
-
-    el.innerHTML = buses
-        .map(
-            (bus, i) => `
-                        <div class="liner-col">
-                            <div class="liner-label ${i === 0 ? "first" : ""}">【${i === 0 ? "先発" : "次発"}】${directionLabel}</div>
-                            <div class="liner-item"><span>${s1}</span> <span>${bus.time1}</span></div>
-                            <div class="liner-item"><span>${s2}</span> <span>${bus.time2}</span></div>
-                        </div>`,
-        )
-        .join("");
 }

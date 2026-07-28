@@ -7,6 +7,8 @@ REM ニュース自動取得プログラムおよび時報、インターネッ�
 wmic process where "commandline like '%%fetch_news.ps1%%'" call terminate
 wmic process where "commandline like '%%fetch_bus.ps1%%'" call terminate
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*fetch_bus.ps1*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+wmic process where "commandline like '%%fetch_imazato_liner.ps1%%'" call terminate
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*fetch_imazato_liner.ps1*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
 wmic process where "commandline like '%%time_signal.ps1%%'" call terminate
 wmic process where "commandline like '%%network_check.ps1%%'" call terminate
 
