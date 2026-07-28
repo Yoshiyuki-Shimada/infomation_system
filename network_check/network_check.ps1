@@ -34,7 +34,13 @@ function Test-InternetConnection {
 
 # オンラインデータ取得スクリプトを終了する
 function Stop-OnlineDataFetchers {
-    foreach ($scriptName in @("fetch_news.ps1", "fetch_bus.ps1")) {
+    foreach (
+        $scriptName in @(
+            "fetch_news.ps1",
+            "fetch_bus.ps1",
+            "fetch_imazato_liner.ps1"
+        )
+    ) {
         Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" `
             -ErrorAction SilentlyContinue |
             Where-Object { $_.CommandLine -like "*$scriptName*" } |
@@ -130,6 +136,12 @@ while ($true) {
         $fetchBusScript = Join-Path $appPath "fetch_bus.ps1"
         if (Test-Path $fetchBusScript) {
             Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File ""$fetchBusScript""" -WindowStyle Hidden
+        }
+
+        # 5. いまざとライナーオンライン情報取得プログラムを再開
+        $fetchImazatoLinerScript = Join-Path $appPath "fetch_imazato_liner.ps1"
+        if (Test-Path $fetchImazatoLinerScript) {
+            Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File ""$fetchImazatoLinerScript""" -WindowStyle Hidden
         }
         
         $isOnline = $true

@@ -192,6 +192,9 @@ function updateSignage() {
     //地震情報
     importEarthquakeData();
 
+    //気象警報・注意報
+    importWeatherWarningData();
+
     //避難情報
     importEvacuationData();
 
@@ -307,6 +310,46 @@ function importEvacuationData() {
 }
 
 /**
+ * 大阪市の気象警報・注意報を取得
+ */
+function importWeatherWarningData() {
+    const warningData = signageData.weatherWarnings;
+    if (!warningData?.warnings?.length) return;
+
+    const decodeJmaStatus = (status) => {
+        const value = String(status || "");
+        if (!/[ÃÂèéç]/.test(value)) return value;
+
+        try {
+            const bytes = Uint8Array.from(
+                [...value].map((character) => character.charCodeAt(0)),
+            );
+            return new TextDecoder("utf-8").decode(bytes);
+        } catch {
+            return value;
+        }
+    };
+    const activeWarnings = warningData.warnings
+        .map((warning) => ({
+            ...warning,
+            status: decodeJmaStatus(warning.status),
+        }))
+        .filter(
+            (warning) =>
+                warning.status !== "解除" &&
+                !warning.status.includes("発表警報・注意報はなし"),
+        );
+    if (!activeWarnings.length) return;
+
+    emergencyList.push(
+        createWeatherWarningHtml({
+            ...warningData,
+            warnings: activeWarnings,
+        }),
+    );
+}
+
+/**
  * 列車の運行情報の取得
  */
 function importRailwayInfoData() {
@@ -370,6 +413,7 @@ function importRailwayInfoData() {
                     causeStr,
                     resumeStr,
                 );
+
             }
 
             railwayList.push(
@@ -420,6 +464,17 @@ function importWeatherData() {
         const getGoogleWeatherIcon = (code, isDay = 1) => {
             let name = "error"; // デフォルト
 
+            // 雷雨系はダーク版のファイル名が異なるため、指定URLを直接返す。
+            if (code === 95) {
+                return "https://maps.gstatic.com/weather/v1/strong_tstorms.svg";
+            }
+            if (code === 96 || code === 99) {
+                return "https://maps.gstatic.com/weather/v1/sleet_hail.svg";
+            }
+            if (code >= 80 && code <= 82) {
+                return "https://maps.gstatic.com/weather/v1/isolated_tstorms.svg";
+            }
+
             if (code === 0) {
                 // CLEAR (image_10386a)
                 name = "sunny";
@@ -444,12 +499,6 @@ function importWeatherData() {
             } else if (code >= 71 && code <= 77) {
                 // SNOW (image_1038ab)
                 name = "snow";
-            } else if (code >= 80 && code <= 82) {
-                // RAIN_SHOWERS (image_10388e)
-                name = "rain_showers";
-            } else if (code >= 95) {
-                // THUNDERSTORM (image_1038c9)
-                name = "thunderstorm";
             }
 
             // 指定のベースURIに基づき、ダークモード用のSVGを返すよ
@@ -525,6 +574,8 @@ function importWeatherData() {
 
                 return {
                     hour,
+                    dateKey: `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`,
+                    dateLabel: `${d.getMonth() + 1}/${d.getDate()}`,
                     code,
                     temp,
                     precipitationProbability,
@@ -534,9 +585,17 @@ function importWeatherData() {
             .filter(Boolean);
 
         const hourlyHtml = forecastItems
-            .map((forecast) => {
+            .map((forecast, index) => {
+                const previousForecast = forecastItems[index - 1];
+                const dateLabel =
+                    !previousForecast ||
+                    previousForecast.dateKey !== forecast.dateKey
+                        ? forecast.dateLabel
+                        : "";
+
                 return createWeatherDataHtmlTime(
                     getGoogleWeatherIcon,
+                    dateLabel,
                     forecast.hour,
                     forecast.code,
                     forecast.isDayTime,
@@ -589,6 +648,12 @@ function importWeatherData() {
                 w,
             ),
         );
+
+        if (signageData.weeklyWeather?.days?.length) {
+            weatherList.push(
+                createWeeklyWeatherHtml(signageData.weeklyWeather),
+            );
+        }
     }
 }
 

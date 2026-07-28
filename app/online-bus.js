@@ -3,7 +3,10 @@ const ONLINE_BUS_MAX_AGE_MS = 120000;
 let onlineBusState = {
     fetchedAt: null,
     schedule: null,
+    pollIntervalMs: 30000,
+    reloadIntervalMs: 30000,
 };
+let onlineBusReloadTimer = null;
 
 function normalizeOnlineText(value) {
     return String(value || "")
@@ -119,6 +122,24 @@ function registerOnlineBusHtml(payload) {
         onlineBusState = {
             fetchedAt,
             schedule,
+            pollIntervalMs: Math.min(
+                3600000,
+                Math.max(
+                    15000,
+                    Number(payload.pollIntervalSeconds || 30) * 1000,
+                ),
+            ),
+            reloadIntervalMs: Math.min(
+                3600000,
+                Math.max(
+                    1000,
+                    Number(
+                        payload.reloadAfterSeconds ||
+                            payload.pollIntervalSeconds ||
+                            30,
+                    ) * 1000,
+                ),
+            ),
         };
     } catch (error) {
         console.error("オンラインバスデータ解析失敗:", error);
@@ -127,23 +148,48 @@ function registerOnlineBusHtml(payload) {
 
 function getCurrentOnlineSchedule(now = new Date()) {
     if (!onlineBusState.fetchedAt || !onlineBusState.schedule) return null;
-    if (now - onlineBusState.fetchedAt > ONLINE_BUS_MAX_AGE_MS) return null;
+    const maxAgeMs = Math.max(
+        ONLINE_BUS_MAX_AGE_MS,
+        onlineBusState.pollIntervalMs + 120000,
+    );
+    if (now - onlineBusState.fetchedAt > maxAgeMs) return null;
 
     return onlineBusState.schedule;
 }
 
+function getOnlineBusFetchedAt() {
+    return onlineBusState.fetchedAt
+        ? new Date(onlineBusState.fetchedAt.getTime())
+        : null;
+}
+
+function getOnlineBusPollIntervalSeconds() {
+    return onlineBusState.pollIntervalMs / 1000;
+}
+
 function reloadOnlineBusData() {
+    if (onlineBusReloadTimer) {
+        clearTimeout(onlineBusReloadTimer);
+        onlineBusReloadTimer = null;
+    }
+
     const oldScript = document.getElementById("online-bus-data-script");
     if (oldScript) oldScript.remove();
 
     const script = document.createElement("script");
     script.id = "online-bus-data-script";
     script.src = `temp/bus_online.js?t=${Date.now()}`;
+    script.onload = () => {
+        onlineBusReloadTimer = setTimeout(
+            reloadOnlineBusData,
+            onlineBusState.reloadIntervalMs,
+        );
+    };
     script.onerror = () => {
         script.remove();
+        onlineBusReloadTimer = setTimeout(reloadOnlineBusData, 30000);
     };
     document.head.appendChild(script);
 }
 
 reloadOnlineBusData();
-setInterval(reloadOnlineBusData, 30000);

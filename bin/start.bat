@@ -12,6 +12,7 @@ powershell -ExecutionPolicy Bypass -Command "(Add-Type '[DllImport(\"user32.dll\
 :: 既に実行中の powershell.exe のうち、fetch_news.ps1 を含むものを強制終了させる
 wmic process where "commandline like '%%fetch_news.ps1%%'" call terminate
 wmic process where "commandline like '%%fetch_bus.ps1%%'" call terminate
+wmic process where "commandline like '%%fetch_imazato_liner.ps1%%'" call terminate
 wmic process where "commandline like '%%time_signal.ps1%%'" call terminate
 wmic process where "commandline like '%%network_check.ps1%%'" call terminate
 
@@ -22,6 +23,9 @@ wmic process where "commandline like '%%network_check.ps1%%'" call terminate
 :: 大阪シティバスのオンライン接近情報を30秒ごとに取得
 start "" /min powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File "%PARENT_DIR%\app\fetch_bus.ps1"
 
+:: Start Imazato Liner online data fetcher
+start "" /min powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File "%PARENT_DIR%\app\fetch_imazato_liner.ps1"
+
 :: 時報アプリ起動
 start "" /min powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File "%PARENT_DIR%\time\time_signal.ps1"
 
@@ -30,9 +34,5 @@ start "" /min powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File "%PAR
 
 :: [4] Edgeをキオスクモードで起動
 rem Edge を起動！パスには PARENT_DIR を使うよ
-start "" "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" ^
-    --kiosk "%PARENT_DIR%\index.html" ^
-    --edge-kiosk-type=fullscreen ^
-    --no-first-run ^
-    --disable-infobars
+start "" /min powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%~dp0start_displays.ps1"
 exit

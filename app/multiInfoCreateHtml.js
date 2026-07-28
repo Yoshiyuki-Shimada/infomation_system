@@ -61,6 +61,103 @@ function createEvacuationHtml(bg, ev) {
 }
 
 /**
+ * 大阪市の気象警報・注意報HTMLを生成
+ * @param {*} warningData
+ * @returns 生成後のHTML
+ */
+function createWeatherWarningHtml(warningData) {
+    const warningNames = {
+        "02": "暴風雪警報",
+        "03": "大雨警報",
+        "04": "洪水警報",
+        "05": "暴風警報",
+        "06": "大雪警報",
+        "07": "波浪警報",
+        "08": "高潮警報",
+        10: "大雨注意報",
+        12: "大雪注意報",
+        13: "風雪注意報",
+        14: "雷注意報",
+        15: "強風注意報",
+        16: "波浪注意報",
+        17: "融雪注意報",
+        18: "洪水注意報",
+        19: "高潮注意報",
+        20: "濃霧注意報",
+        21: "乾燥注意報",
+        22: "なだれ注意報",
+        23: "低温注意報",
+        24: "霜注意報",
+        25: "着氷注意報",
+        26: "着雪注意報",
+        32: "暴風雪特別警報",
+        33: "大雨特別警報",
+        35: "暴風特別警報",
+        36: "大雪特別警報",
+        37: "波浪特別警報",
+        38: "高潮特別警報",
+    };
+    Object.assign(warningNames, {
+        "02": "暴風雪警報", "03": "大雨警報", "04": "氾濫警報",
+        "05": "暴風警報", "06": "大雪警報", "07": "波浪警報",
+        "08": "高潮警報", "09": "土砂災害警報",
+        "10": "大雨注意報", "12": "大雪注意報", "13": "風雪注意報",
+        "14": "雷注意報", "15": "強風注意報", "16": "波浪注意報",
+        "17": "融雪注意報", "18": "氾濫注意報", "19": "高潮注意報",
+        "20": "濃霧注意報", "21": "乾燥注意報", "22": "なだれ注意報",
+        "23": "低温注意報", "24": "霜注意報", "25": "着氷注意報",
+        "26": "着雪注意報", "27": "その他の注意報",
+        "29": "土砂災害注意報",
+        "32": "暴風雪特別警報", "33": "大雨特別警報",
+        "34": "氾濫特別警報", "35": "暴風特別警報",
+        "36": "大雪特別警報", "37": "波浪特別警報",
+        "38": "高潮特別警報", "39": "土砂災害特別警報",
+        "43": "大雨危険警報", "44": "氾濫危険警報",
+        "48": "高潮危険警報", "49": "土砂災害危険警報",
+    });
+    const getWarningLevel = (code) => {
+        const number = Number(code);
+        if ((number >= 32 && number <= 39) || number >= 40) return "special";
+        if (number >= 2 && number <= 9) return "warning";
+        return "advisory";
+    };
+    const warningItems = warningData.warnings
+        .map((warning) => {
+            const code = String(warning.code).padStart(2, "0");
+            const level = getWarningLevel(code);
+            const name = warningNames[code] || `気象情報（${code}）`;
+
+            return `
+                <div class="weather-warning-item weather-warning-${level}">
+                    <div class="weather-warning-name">${name}</div>
+                    <div class="weather-warning-status">${warning.status || "発表中"}</div>
+                </div>
+            `;
+        })
+        .join("");
+    const reportDate = warningData.reportDatetime
+        ? new Date(warningData.reportDatetime)
+        : null;
+    const reportTime =
+        reportDate && !Number.isNaN(reportDate.getTime())
+            ? `${String(reportDate.getHours()).padStart(2, "0")}:${String(reportDate.getMinutes()).padStart(2, "0")}発表`
+            : "";
+
+    return `
+        <div class="slide weather-warning-slide">
+            <div class="slide-title">気象警報・注意報（大阪市）</div>
+            <div class="slide-content">
+                <div class="weather-warning-report-time">${reportTime}</div>
+                <div class="weather-warning-list">
+                    ${warningItems}
+                </div>
+                <div class="weather-warning-source">気象庁発表</div>
+            </div>
+        </div>
+    `;
+}
+
+/**
  * 運行情報の概要のHTMLを生成
  * @param {*} formattedSections 影響区間・
  * @param {*} causeStr 原因
@@ -108,6 +205,29 @@ function resumeStrHtml(resumeStr) {
             <div class="railway-detail-label">運転再開見込み</div>
             <div class="railway-detail-content">
                 ${resumeStr}
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * JR西日本・近畿エリアの現在の運行状況路線図スライドを生成
+ * @param {*} routeMapUrl 路線図画像URL
+ * @returns 生成後のHTML
+ */
+function createJRWestRouteMapSlideHtml(routeMapUrl) {
+    return `
+        <div class="slide jr-west-route-map-slide">
+            <div class="slide-title">JR線の現在の運行情報</div>
+            <div class="slide-content">
+                <figure class="jr-west-route-map">
+                    <figcaption>近畿エリア路線図</figcaption>
+                    <img
+                        src="${routeMapUrl}"
+                        alt="JR西日本 近畿エリアの現在の運行情報路線図"
+                        class="jr-west-route-map-image"
+                    >
+                </figure>
             </div>
         </div>
     `;
@@ -206,6 +326,7 @@ function createNewsDataHtml(title, htmlText) {
 /**
  * 3時間ごとの天気予報のHTMLを生成
  * @param {*} getGoogleWeatherIcon
+ * @param {*} dateLabel
  * @param {*} hour
  * @param {*} code
  * @param {*} isDayTime
@@ -216,6 +337,7 @@ function createNewsDataHtml(title, htmlText) {
  */
 function createWeatherDataHtmlTime(
     getGoogleWeatherIcon,
+    dateLabel,
     hour,
     code,
     isDayTime,
@@ -230,6 +352,7 @@ function createWeatherDataHtmlTime(
 
     return `
         <div class="weather-item weather_time">
+            <span class="weather_time_date">${dateLabel}</span>
             <span class="weather_time_hour">${String(hour).padStart(2, "0")}:00</span>
             <img src="${getGoogleWeatherIcon(code, isDayTime)}" class="weather_time_icon">
             <div><span class="weather_time_msg">${wMap[code] || "情報なし"}</span></div>
@@ -268,18 +391,15 @@ function createWeatherTemperatureGraphHtml(forecastItems) {
                 usableHeight;
         return { x, y, temp: item.temp };
     });
-    let curveSegments = "";
-    for (let index = 1; index < points.length; index++) {
-        const previous = points[index - 1];
-        const current = points[index];
-        const middleX = (previous.x + current.x) / 2;
-        curveSegments += ` C ${middleX} ${previous.y}, ${middleX} ${current.y}, ${current.x} ${current.y}`;
-    }
-    const linePath = `M ${points[0].x} ${points[0].y}${curveSegments}`;
+    const lineSegments = points
+        .slice(1)
+        .map((point) => `L ${point.x} ${point.y}`)
+        .join(" ");
+    const linePath = `M ${points[0].x} ${points[0].y} ${lineSegments}`;
     const areaPath = [
         `M 0 ${points[0].y}`,
         `L ${points[0].x} ${points[0].y}`,
-        curveSegments,
+        lineSegments,
         `L ${graphWidth} ${points[points.length - 1].y}`,
         `L ${graphWidth} ${graphHeight}`,
         `L 0 ${graphHeight}`,
@@ -356,6 +476,27 @@ function createWeatherDataHtmlNow(
         currentPrecipitationProbability == null
             ? "--"
             : `${Math.round(currentPrecipitationProbability)}%`;
+    const todayDateKey = new Date().toLocaleDateString("sv-SE");
+    const todayIndex = Array.isArray(w.daily?.time)
+        ? Math.max(0, w.daily.time.indexOf(todayDateKey))
+        : 0;
+    const todayMaximumTemperature = Number(
+        w.daily?.temperature_2m_max?.[todayIndex],
+    );
+    const todayMinimumTemperature = Number(
+        w.daily?.temperature_2m_min?.[todayIndex],
+    );
+    const maximumTemperatureText = Number.isFinite(todayMaximumTemperature)
+        ? `${Math.round(todayMaximumTemperature)}℃`
+        : "--";
+    const minimumTemperatureText = Number.isFinite(todayMinimumTemperature)
+        ? `${Math.round(todayMinimumTemperature)}℃`
+        : "--";
+    const temperatureLabels = createTemperatureDayLabelsHtml(
+        todayMaximumTemperature,
+        todayMinimumTemperature,
+        "now",
+    );
 
     return `
         <div class="slide">
@@ -369,6 +510,11 @@ function createWeatherDataHtmlNow(
                         </span><br>
                         <span class="weather_name_now">${wMap[currentCode] || "情報なし"}</span>
                         <div class="weather_precipitation_now">降水確率 ${precipitationText}</div>
+                        <div class="weather_temperature_range_now">
+                            <span class="weather_temperature_max_now">最高 ${maximumTemperatureText}</span>
+                            <span class="weather_temperature_min_now">最低 ${minimumTemperatureText}</span>
+                        </div>
+                        ${temperatureLabels}
                     </div>
                 </div>
                 <div class="weather_time_grid">今後の予報（3時間おき）</div>
@@ -401,6 +547,17 @@ function createWeatherDataHtmlTomorrow(
         tomorrowPrecipitationProbability == null
             ? "--"
             : `${Math.round(tomorrowPrecipitationProbability)}%`;
+    const tomorrowMaxTemperature = Math.round(
+        w.daily.temperature_2m_max[1],
+    );
+    const tomorrowMinTemperature = Math.round(
+        w.daily.temperature_2m_min[1],
+    );
+    const temperatureLabels = createTemperatureDayLabelsHtml(
+        tomorrowMaxTemperature,
+        tomorrowMinTemperature,
+        "tomorrow",
+    );
 
     return `
         <div class="slide">
@@ -411,16 +568,179 @@ function createWeatherDataHtmlTomorrow(
                     <span class="weather_name_tomorrow">${wMap[tomorrowCode] || "情報なし"}</span><br>
                     <span class="weather_temperature_tomorrow">
                         <span class="weather_temperature_max_tomorrow">
-                            ${Math.round(w.daily.temperature_2m_max[1])}℃
+                            ${tomorrowMaxTemperature}℃
                         </span>
                         <span class="weather_slash_tomorrow">/</span>
                         <span class="weather_temperature_min_tomorrow">
-                            ${Math.round(w.daily.temperature_2m_min[1])}℃
+                            ${tomorrowMinTemperature}℃
                         </span>
                     </span>
                     <span class="weather_precipitation_tomorrow">
                         降水確率 ${precipitationText}
                     </span>
+                    ${temperatureLabels}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function createTemperatureDayLabelsHtml(
+    maximumTemperature,
+    minimumTemperature,
+    size = "weekly",
+) {
+    const labels = [];
+
+    if (maximumTemperature >= 40) {
+        labels.push({ text: "酷暑日", className: "extreme-hot" });
+    } else if (maximumTemperature >= 35) {
+        labels.push({ text: "猛暑日", className: "very-hot" });
+    } else if (maximumTemperature >= 30) {
+        labels.push({ text: "真夏日", className: "mid-summer" });
+    } else if (maximumTemperature >= 25) {
+        labels.push({ text: "夏日", className: "summer" });
+    } else if (maximumTemperature < 0) {
+        labels.push({ text: "真冬日", className: "ice-day" });
+    }
+
+    if (minimumTemperature >= 30) {
+        labels.push({ text: "超熱帯夜", className: "extreme-tropical-night" });
+    } else if (minimumTemperature >= 25) {
+        labels.push({ text: "熱帯夜", className: "tropical-night" });
+    } else if (minimumTemperature < 0) {
+        labels.push({ text: "冬日", className: "winter-day" });
+    }
+
+    if (!labels.length) return "";
+
+    return `
+        <div class="temperature-day-labels temperature-day-labels-${size}">
+            ${labels
+                .map(
+                    (label) =>
+                        `<span class="temperature-day-label temperature-day-${label.className}">${label.text}</span>`,
+                )
+                .join("")}
+        </div>
+    `;
+}
+
+/**
+ * 気象庁の週間天気予報HTMLを生成
+ * @param {*} weeklyWeather
+ * @returns 生成後のHTML
+ */
+function createWeeklyWeatherHtml(weeklyWeather) {
+    const weekdays = ["日", "月", "火", "水", "木", "金", "土"];
+    const weatherNames = {
+        100: "晴れ",
+        101: "晴れ時々曇り",
+        102: "晴れ一時雨",
+        103: "晴れ時々雨",
+        104: "晴れ一時雪",
+        105: "晴れ時々雪",
+        110: "晴れ後時々曇り",
+        111: "晴れ後曇り",
+        112: "晴れ後一時雨",
+        113: "晴れ後時々雨",
+        114: "晴れ後雨",
+        115: "晴れ後一時雪",
+        116: "晴れ後時々雪",
+        117: "晴れ後雪",
+        200: "曇り",
+        201: "曇り時々晴れ",
+        202: "曇り一時雨",
+        203: "曇り時々雨",
+        204: "曇り一時雪",
+        205: "曇り時々雪",
+        210: "曇り後時々晴れ",
+        211: "曇り後晴れ",
+        212: "曇り後一時雨",
+        213: "曇り後時々雨",
+        214: "曇り後雨",
+        215: "曇り後一時雪",
+        216: "曇り後時々雪",
+        217: "曇り後雪",
+        300: "雨",
+        301: "雨時々晴れ",
+        302: "雨時々止む",
+        303: "雨時々雪",
+        308: "雨で暴風を伴う",
+        311: "雨後晴れ",
+        313: "雨後曇り",
+        314: "雨後雪",
+        400: "雪",
+        401: "雪時々晴れ",
+        402: "雪時々止む",
+        403: "雪時々雨",
+        406: "風雪が強い",
+        411: "雪後晴れ",
+        413: "雪後曇り",
+        414: "雪後雨",
+    };
+    const getFallbackWeatherName = (code) => {
+        if (code >= 100 && code < 200) return "晴れ";
+        if (code >= 200 && code < 300) return "曇り";
+        if (code >= 300 && code < 400) return "雨";
+        if (code >= 400 && code < 500) return "雪";
+        return "情報なし";
+    };
+
+    const items = weeklyWeather.days
+        .map((forecast) => {
+            const date = new Date(`${forecast.date}T00:00:00`);
+            const code = Number(forecast.weatherCode);
+            const dateText = `${date.getMonth() + 1}/${date.getDate()}（${weekdays[date.getDay()]}）`;
+            const weatherName =
+                weatherNames[code] || getFallbackWeatherName(code);
+            const maxTemperature =
+                forecast.temperatureMax == null
+                    ? "--"
+                    : Math.round(forecast.temperatureMax);
+            const minTemperature =
+                forecast.temperatureMin == null
+                    ? "--"
+                    : Math.round(forecast.temperatureMin);
+            const precipitationProbability =
+                forecast.precipitationProbability == null
+                    ? "--"
+                    : `${Math.round(forecast.precipitationProbability)}%`;
+            const temperatureLabels = createTemperatureDayLabelsHtml(
+                maxTemperature,
+                minTemperature,
+                "weekly",
+            );
+
+            return `
+                <div class="weather_weekly_item">
+                    <div class="weather_weekly_date">${dateText}</div>
+                    <img
+                        src="https://www.jma.go.jp/bosai/forecast/img/${forecast.weatherCode}.svg"
+                        class="weather_weekly_icon"
+                        alt="${weatherName}"
+                    >
+                    <div class="weather_weekly_name">${weatherName}</div>
+                    <div class="weather_weekly_temperature">
+                        <span class="weather_weekly_max">${maxTemperature}℃</span>
+                        <span class="weather_weekly_slash">/</span>
+                        <span class="weather_weekly_min">${minTemperature}℃</span>
+                    </div>
+                    <div class="weather_weekly_precipitation">
+                        降水確率 ${precipitationProbability}
+                    </div>
+                    ${temperatureLabels}
+                </div>
+            `;
+        })
+        .join("");
+
+    return `
+        <div class="slide">
+            <div class="slide-title">週間天気予報（大阪府・気象庁）</div>
+            <div class="slide-content">
+                <div class="weather_weekly_grid">
+                    ${items}
                 </div>
             </div>
         </div>

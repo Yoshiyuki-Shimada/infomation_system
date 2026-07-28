@@ -30,9 +30,12 @@ while ($true) {
         weather    = @();
         news       = @();
         railway    = @();
+        jrWestRouteMapUrl = $null;
         earthquake = $null;
         tsunami    = @();
         evacuation = @();
+        weeklyWeather = $null;
+        weatherWarnings = $null;
         updateTime = "";
     }
     Write-Host "$(Get-Date -Format 'HH:mm:ss') [Snow Link Drone] 情報更新開始..." -ForegroundColor Cyan
@@ -97,6 +100,90 @@ while ($true) {
 
                 Write-Host " 天気降水確率：気象庁データで補正" -ForegroundColor Green
             }
+
+            # 気象庁の週間天気予報を表示用データとして保存
+            if ($jma.Count -gt 1 -and $jma[1].timeSeries.Count -ge 2) {
+                $weeklyWeatherSeries = $jma[1].timeSeries[0]
+                $weeklyTemperatureSeries = $jma[1].timeSeries[1]
+                $weeklyWeatherArea = $weeklyWeatherSeries.areas |
+                    Where-Object { $_.area.code -eq "270000" } |
+                    Select-Object -First 1
+                $weeklyTemperatureArea = $weeklyTemperatureSeries.areas |
+                    Where-Object { $_.area.code -eq "62078" } |
+                    Select-Object -First 1
+
+                if ($weeklyWeatherArea -and $weeklyTemperatureArea) {
+                    $shortTemperatureSeries = $jma[0].timeSeries |
+                        Where-Object { $_.areas[0].temps } |
+                        Select-Object -First 1
+                    $shortTemperatureArea = $shortTemperatureSeries.areas |
+                        Where-Object { $_.area.code -eq "62078" } |
+                        Select-Object -First 1
+                    $weeklyDays = @()
+                    $weeklyTimes = @($weeklyWeatherSeries.timeDefines)
+
+                    for ($dayIndex = 0; $dayIndex -lt $weeklyTimes.Count; $dayIndex++) {
+                        $targetDate = [datetimeoffset]::Parse($weeklyTimes[$dayIndex]).Date
+                        $pop = [string]$weeklyWeatherArea.pops[$dayIndex]
+                        $tempMin = [string]$weeklyTemperatureArea.tempsMin[$dayIndex]
+                        $tempMax = [string]$weeklyTemperatureArea.tempsMax[$dayIndex]
+
+                        if ([string]::IsNullOrWhiteSpace($pop) -and $popSeries) {
+                            $shortPopsForDate = @()
+                            for ($popIndex = 0; $popIndex -lt $jmaTimeDefines.Count; $popIndex++) {
+                                $popDate = [datetimeoffset]::Parse($jmaTimeDefines[$popIndex]).Date
+                                if ($popDate -eq $targetDate -and
+                                    -not [string]::IsNullOrWhiteSpace([string]$jmaPops[$popIndex])) {
+                                    $shortPopsForDate += [int]$jmaPops[$popIndex]
+                                }
+                            }
+                            if ($shortPopsForDate.Count -gt 0) {
+                                $pop = [string](($shortPopsForDate | Measure-Object -Maximum).Maximum)
+                            }
+                        }
+
+                        if (($tempMin -eq "" -or $tempMax -eq "") -and
+                            $shortTemperatureSeries -and $shortTemperatureArea) {
+                            $shortTempsForDate = @()
+                            $shortTemperatureTimes = @($shortTemperatureSeries.timeDefines)
+                            $shortTemperatures = @($shortTemperatureArea.temps)
+
+                            for ($tempIndex = 0; $tempIndex -lt $shortTemperatureTimes.Count; $tempIndex++) {
+                                $temperatureDate = [datetimeoffset]::Parse($shortTemperatureTimes[$tempIndex]).Date
+                                if ($temperatureDate -eq $targetDate -and
+                                    -not [string]::IsNullOrWhiteSpace([string]$shortTemperatures[$tempIndex])) {
+                                    $shortTempsForDate += [int]$shortTemperatures[$tempIndex]
+                                }
+                            }
+
+                            if ($shortTempsForDate.Count -gt 0) {
+                                if ([string]::IsNullOrWhiteSpace($tempMin)) {
+                                    $tempMin = [string](($shortTempsForDate | Measure-Object -Minimum).Minimum)
+                                }
+                                if ([string]::IsNullOrWhiteSpace($tempMax)) {
+                                    $tempMax = [string](($shortTempsForDate | Measure-Object -Maximum).Maximum)
+                                }
+                            }
+                        }
+
+                        $weeklyDays += @{
+                            date = $targetDate.ToString("yyyy-MM-dd")
+                            weatherCode = [string]$weeklyWeatherArea.weatherCodes[$dayIndex]
+                            precipitationProbability = if ([string]::IsNullOrWhiteSpace($pop)) { $null } else { [int]$pop }
+                            temperatureMin = if ([string]::IsNullOrWhiteSpace($tempMin)) { $null } else { [int]$tempMin }
+                            temperatureMax = if ([string]::IsNullOrWhiteSpace($tempMax)) { $null } else { [int]$tempMax }
+                            reliability = [string]$weeklyWeatherArea.reliabilities[$dayIndex]
+                        }
+                    }
+
+                    $data.weeklyWeather = @{
+                        reportDatetime = [string]$jma[1].reportDatetime
+                        areaName = "大阪府"
+                        days = $weeklyDays
+                    }
+                    Write-Host " 週間天気予報：気象庁データ取得済み" -ForegroundColor Green
+                }
+            }
         }
         catch {
             Write-Host " 天気降水確率：気象庁補正失敗・Open-Meteo値を使用" -ForegroundColor Yellow
@@ -106,6 +193,80 @@ while ($true) {
         Write-Host " 天気取得：処理済み" -ForegroundColor Green
     }
     catch { Write-Host " 天気取得：失敗・処理中断" -ForegroundColor Red }
+
+    # --- 大阪市の気象警報・注意報（気象庁） ---
+    try {
+        $warningResponse = Invoke-WebRequest `
+            -Uri "https://www.jma.go.jp/bosai/warning/data/r8/270000.json" `
+            -UserAgent $ua `
+            -UseBasicParsing `
+            -TimeoutSec 15
+        $warningResponse.RawContentStream.Position = 0
+        $warningReader = [System.IO.StreamReader]::new(
+            $warningResponse.RawContentStream,
+            [System.Text.Encoding]::UTF8,
+            $true
+        )
+        try {
+            $warningJson = $warningReader.ReadToEnd()
+        }
+        finally {
+            $warningReader.Dispose()
+        }
+        $warningReports = @($warningJson | ConvertFrom-Json)
+        $osakaCityWarningsByCode = [ordered]@{}
+        $warningReportDatetime = $null
+        $targetWarningAreaCodes = @(
+            "2710000", # 大阪市
+            "2711600"  # 大阪市生野区（区単位で配信された場合）
+        )
+
+        foreach ($report in $warningReports) {
+            foreach ($item in @($report.warning.class20Items)) {
+                if ([string]$item.areaCode -notin $targetWarningAreaCodes) {
+                    continue
+                }
+
+                foreach ($kind in @($item.kinds)) {
+                    $status = [string]$kind.status
+                    $code = [string]$kind.code
+                    if (
+                        [string]::IsNullOrWhiteSpace($code) -or
+                        $status -eq "解除" -or
+                        $status -match "発表警報・注意報はなし"
+                    ) {
+                        continue
+                    }
+
+                    if (-not $osakaCityWarningsByCode.Contains($code)) {
+                        $osakaCityWarningsByCode[$code] = @{
+                            code = $code
+                            status = $status
+                        }
+                    }
+                    if ([string]::IsNullOrWhiteSpace($warningReportDatetime)) {
+                        $warningReportDatetime = [string]$report.reportDatetime
+                    }
+                }
+            }
+        }
+        $osakaCityWarnings = @($osakaCityWarningsByCode.Values)
+
+        if ($osakaCityWarnings.Count -gt 0) {
+            $data.weatherWarnings = @{
+                reportDatetime = $warningReportDatetime
+                areaName = "大阪市"
+                warnings = $osakaCityWarnings
+            }
+            Write-Host " 気象警報・注意報：大阪市に発表中の情報あり" -ForegroundColor Yellow
+        }
+        else {
+            Write-Host " 気象警報・注意報：大阪市は発表なし" -ForegroundColor Green
+        }
+    }
+    catch {
+        Write-Host " 気象警報・注意報：取得失敗（$($_.Exception.Message)）" -ForegroundColor Yellow
+    }
 
     Write-Host " [RAILWAY] 鉄道処理を開始します..." -ForegroundColor DarkCyan
     try {
@@ -186,7 +347,198 @@ while ($true) {
 
         # JR実行
         $jrResults = Get-JRWestTrafficInfoData
-        if ($jrResults) { $data.railway += $jrResults }
+        if ($jrResults) {
+            $data.railway += $jrResults
+
+            # 路線図取得は行わない。
+            $hasJrKinkiDisruption = $false
+
+            if ($hasJrKinkiDisruption) {
+                try {
+                    $jrKinkiPageUrl = "https://trafficinfo.westjr.co.jp/kinki.html"
+                    $jrKinkiHtml = (
+                        Invoke-WebRequest `
+                            -Uri $jrKinkiPageUrl `
+                            -UserAgent $ua `
+                            -UseBasicParsing `
+                            -TimeoutSec 15
+                    ).Content
+
+                    # Next.jsの埋め込みデータ内では画像パスが
+                    # \/、\u002F、%2Fなどにエスケープされる場合がある。
+                    $jrKinkiSearchHtml = $jrKinkiHtml `
+                        -replace '\\u002[fF]', '/' `
+                        -replace '\\/', '/' `
+                        -replace '%2[fF]', '/'
+                    $routeMapImageTag = [regex]::Match(
+                        $jrKinkiSearchHtml,
+                        '(?is)<img\b[^>]*class=["''][^"'']*RouteMap_overview__[^"'']*["''][^>]*>'
+                    )
+
+                    $routeMapSrcMatch = $null
+                    if ($routeMapImageTag.Success) {
+                        $routeMapSrcMatch = [regex]::Match(
+                            $routeMapImageTag.Value,
+                            '\bsrc=["''](?<src>[^"'']+)["'']'
+                        )
+                    }
+
+                    # CSSクラス名が変更された場合も、路線図画像のパスから取得する。
+                    if (-not $routeMapSrcMatch -or -not $routeMapSrcMatch.Success) {
+                        $routeMapSrcMatch = [regex]::Match(
+                            $jrKinkiSearchHtml,
+                            '(?is)\bsrc=["''](?<src>[^"'']*/routemap/[^"'']+\.(?:gif|png|svg)(?:\?[^"'']*)?)["'']'
+                        )
+                    }
+
+                    # src属性がReact Server Components内に分割されていても、
+                    # 概要版の路線図パスそのものを拾う。
+                    if (-not $routeMapSrcMatch -or -not $routeMapSrcMatch.Success) {
+                        $routeMapSrcMatch = [regex]::Match(
+                            $jrKinkiSearchHtml,
+                            '(?is)(?<src>/routemap/[^\\\s"'']*?routemap_small_kinki\.(?:gif|png|svg)(?:\?[^\\\s"'']*)?)'
+                        )
+                    }
+
+                    # ファイル名が変更された場合の最終フォールバック。
+                    if (-not $routeMapSrcMatch -or -not $routeMapSrcMatch.Success) {
+                        $routeMapSrcMatch = [regex]::Match(
+                            $jrKinkiSearchHtml,
+                            '(?is)(?<src>/routemap/[^\\\s"'']+\.(?:gif|png|svg)(?:\?[^\\\s"'']*)?)'
+                        )
+                    }
+
+                    # 静的HTMLに路線図がない場合は、EdgeでJavaScript実行後の
+                    # DOMを取得する。JR西日本ページは路線図を後から描画する場合がある。
+                    $renderedHtml = ""
+                    if (-not $routeMapSrcMatch -or -not $routeMapSrcMatch.Success) {
+                        $edgeCandidates = @(
+                            (Get-Command "msedge.exe" -ErrorAction SilentlyContinue).Source,
+                            "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe",
+                            "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"
+                        ) | Where-Object {
+                            -not [string]::IsNullOrWhiteSpace($_) -and
+                            (Test-Path -LiteralPath $_ -PathType Leaf)
+                        } | Select-Object -Unique
+
+                        $edgePath = $edgeCandidates | Select-Object -First 1
+                        if ($edgePath) {
+                            $edgeProfilePath = Join-Path `
+                                -Path $tempDir `
+                                -ChildPath "jr-route-map-edge-profile"
+                            if (-not (Test-Path -LiteralPath $edgeProfilePath)) {
+                                New-Item `
+                                    -Path $edgeProfilePath `
+                                    -ItemType Directory `
+                                    -Force | Out-Null
+                            }
+
+                            $edgeOutputPath = Join-Path `
+                                -Path $tempDir `
+                                -ChildPath "jr_kinki_edge_output.html"
+                            $edgeErrorPath = Join-Path `
+                                -Path $tempDir `
+                                -ChildPath "jr_kinki_edge_error.log"
+                            [IO.File]::WriteAllText(
+                                $edgeOutputPath,
+                                "",
+                                [Text.UTF8Encoding]::new($false)
+                            )
+                            [IO.File]::WriteAllText(
+                                $edgeErrorPath,
+                                "",
+                                [Text.UTF8Encoding]::new($false)
+                            )
+
+                            $edgeArguments = @(
+                                "--headless=new",
+                                "--disable-gpu",
+                                "--no-first-run",
+                                "--disable-extensions",
+                                "--run-all-compositor-stages-before-draw",
+                                "--virtual-time-budget=10000",
+                                "`"--user-data-dir=$edgeProfilePath`"",
+                                "--dump-dom",
+                                $jrKinkiPageUrl
+                            )
+                            $edgeProcess = Start-Process `
+                                -FilePath $edgePath `
+                                -ArgumentList $edgeArguments `
+                                -RedirectStandardOutput $edgeOutputPath `
+                                -RedirectStandardError $edgeErrorPath `
+                                -WindowStyle Hidden `
+                                -Wait `
+                                -PassThru
+                            $renderedHtml = Get-Content `
+                                -LiteralPath $edgeOutputPath `
+                                -Raw `
+                                -Encoding UTF8 `
+                                -ErrorAction SilentlyContinue
+                            Write-Host `
+                                "  -> [JR] Edge描画後HTMLを確認（終了コード$($edgeProcess.ExitCode)・$($renderedHtml.Length)文字）" `
+                                -ForegroundColor DarkGray
+
+                            $renderedSearchHtml = $renderedHtml `
+                                -replace '\\u002[fF]', '/' `
+                                -replace '\\/', '/' `
+                                -replace '%2[fF]', '/'
+                            $routeMapSrcMatch = [regex]::Match(
+                                $renderedSearchHtml,
+                                '(?is)<img\b[^>]*alt=["'']路線図_概要["''][^>]*\bsrc=["''](?<src>[^"'']+)["'']'
+                            )
+                            if (-not $routeMapSrcMatch.Success) {
+                                $routeMapSrcMatch = [regex]::Match(
+                                    $renderedSearchHtml,
+                                    '(?is)<img\b[^>]*\bsrc=["''](?<src>[^"'']+)["''][^>]*alt=["'']路線図_概要["'']'
+                                )
+                            }
+                            if (-not $routeMapSrcMatch.Success) {
+                                $routeMapSrcMatch = [regex]::Match(
+                                    $renderedSearchHtml,
+                                    '(?is)(?<src>/routemap/[^\\\s"'']+\.(?:gif|png|svg)(?:\?[^\\\s"'']*)?)'
+                                )
+                            }
+                        }
+                    }
+
+                    if ($routeMapSrcMatch.Success) {
+                        $routeMapSrc = [Net.WebUtility]::HtmlDecode(
+                            $routeMapSrcMatch.Groups["src"].Value
+                        )
+                        $jrKinkiBaseUri = [Uri]$jrKinkiPageUrl
+                        $data.jrWestRouteMapUrl = [Uri]::new(
+                            $jrKinkiBaseUri,
+                            $routeMapSrc
+                        ).AbsoluteUri
+                        Write-Host "  -> [JR] 近畿エリア路線図を取得" -ForegroundColor Green
+                    }
+                    else {
+                        $staticDebugPath = Join-Path `
+                            -Path $tempDir `
+                            -ChildPath "jr_kinki_static_debug.html"
+                        $renderedDebugPath = Join-Path `
+                            -Path $tempDir `
+                            -ChildPath "jr_kinki_rendered_debug.html"
+                        [IO.File]::WriteAllText(
+                            $staticDebugPath,
+                            [string]$jrKinkiHtml,
+                            [Text.UTF8Encoding]::new($false)
+                        )
+                        [IO.File]::WriteAllText(
+                            $renderedDebugPath,
+                            [string]$renderedHtml,
+                            [Text.UTF8Encoding]::new($false)
+                        )
+                        Write-Host `
+                            "  -> [JR] 近畿エリア路線図が見つかりません（診断HTMLをtempへ保存）" `
+                            -ForegroundColor Yellow
+                    }
+                }
+                catch {
+                    Write-Host "  -> [JR] 近畿エリア路線図の取得失敗" -ForegroundColor Yellow
+                }
+            }
+        }
 
         # --- Yahoo!他社線 ---
         if ($privateLineIds) {
