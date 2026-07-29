@@ -11,6 +11,8 @@ wmic process where "commandline like '%%fetch_imazato_liner.ps1%%'" call termina
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*fetch_imazato_liner.ps1*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
 wmic process where "commandline like '%%time_signal.ps1%%'" call terminate
 wmic process where "commandline like '%%network_check.ps1%%'" call terminate
+wmic process where "commandline like '%%earthquake_monitor.ps1%%'" call terminate
+wmic process where "commandline like '%%play_eew_sequence.ps1%%'" call terminate
 
 
 REM 10秒待ってスリープ状態

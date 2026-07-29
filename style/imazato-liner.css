@@ -57,12 +57,15 @@
 
 .liner-bus-list {
     flex: 1;
+    justify-content: flex-start;
     padding-bottom: 0;
 }
 
 .liner-schedule-row {
-    flex: 1;
+    flex: 0 0 calc(100% / 3);
+    height: calc(100% / 3);
     min-height: 0;
+    box-sizing: border-box;
     padding: 6px 18px;
 }
 

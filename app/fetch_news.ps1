@@ -646,47 +646,8 @@ while ($true) {
         }
     }
 
-    # --- 4. 地震情報 ---
-    try {
-        $eq = Invoke-RestMethod -Uri "https://api.p2pquake.net/v2/history?codes=551&limit=1"
-        if ($eq) {
-            $q = $eq[0]; 
-            $ikuno = $q.points | Where-Object { $_.addr -match "生野区" }
-            $data.earthquake = @{
-                time       = $q.earthquake.time; 
-                hypocenter = $q.earthquake.hypocenter.name;
-                maxScale   = $q.earthquake.maxScale; 
-                # 修正：.pref から .scale に変更
-                ikunoScale = if ($ikuno) { $ikuno.scale } else { 0 }; 
-                magnitude  = $q.earthquake.hypocenter.magnitude; 
-                depth      = $q.earthquake.hypocenter.depth;
-                tsunami    = $q.earthquake.tsunamiAdvisory;
-            }
-            Write-Host " 地震情報取得：処理済み" -ForegroundColor Green
-        }
-    }
-    catch { Write-Host " 地震情報取得：失敗" -ForegroundColor Red }
-
-    # --- 4.5 津波情報 (コード552) 新設！ ---
-    try {
-        # P2P地震情報の「津波情報（552）」を個別に取得
-        $tsunamiResponse = Invoke-RestMethod -Uri "https://api.p2pquake.net/v2/history?codes=552&limit=1"
-        if ($tsunamiResponse -and $tsunamiResponse.Count -gt 0) {
-            $t = $tsunamiResponse[0]
-            # 発表されている全エリアをループして抽出
-            if ($t.areas) {
-                foreach ($area in $t.areas) {
-                    $data.tsunami += @{
-                        name  = $area.name;  # 沿岸名（例：徳島県、和歌山県など）
-                        grade = $area.grade; # 警報の種類（大津波警報/津波警報/津波注意報）
-                    }
-                }
-            }
-            Write-Host " 津波詳細取得：処理済み ($($data.tsunami.Count)件)" -ForegroundColor Green
-        }
-    }
-    catch { Write-Host " 津波詳細取得：失敗" -ForegroundColor Red }
-
+    # --- 4. 地震・津波情報 ---
+    # 地震・津波・緊急地震速報は earthquake\earthquake_monitor.ps1 で常時監視する。
     # --- 5. 避難情報 (大阪市生野区) ---
     try {
         #27/27116/
