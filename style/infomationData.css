@@ -246,6 +246,106 @@
     font-size: 12px;
     font-weight: normal;
 }
+/* 非常情報表示時だけ現在天気を圧縮して、下部バナーに隠れないようにする */
+#slide-container.with-earthquake-bottom-banner .weather_now,
+.slide-area.with-earthquake-bottom-banner .weather_now {
+    gap: 22px;
+    margin-bottom: 8px;
+}
+
+#slide-container.with-earthquake-bottom-banner .weather_icon_now,
+.slide-area.with-earthquake-bottom-banner .weather_icon_now {
+    width: 96px;
+    height: 96px;
+}
+
+#slide-container.with-earthquake-bottom-banner .weather_temperature_now,
+.slide-area.with-earthquake-bottom-banner .weather_temperature_now {
+    font-size: 2.35rem;
+}
+
+#slide-container.with-earthquake-bottom-banner .weather_name_now,
+.slide-area.with-earthquake-bottom-banner .weather_name_now {
+    font-size: 1.55rem;
+}
+
+#slide-container.with-earthquake-bottom-banner .weather_precipitation_now,
+.slide-area.with-earthquake-bottom-banner .weather_precipitation_now {
+    margin-top: 4px;
+    font-size: 1.28rem;
+}
+
+#slide-container.with-earthquake-bottom-banner .weather_temperature_range_now,
+.slide-area.with-earthquake-bottom-banner .weather_temperature_range_now {
+    margin-top: 4px;
+    font-size: 1.1rem;
+}
+
+#slide-container.with-earthquake-bottom-banner .temperature-day-labels-now,
+.slide-area.with-earthquake-bottom-banner .temperature-day-labels-now {
+    margin-top: 4px;
+}
+
+#slide-container.with-earthquake-bottom-banner .temperature-day-labels-now .temperature-day-label,
+.slide-area.with-earthquake-bottom-banner .temperature-day-labels-now .temperature-day-label {
+    padding: 3px 10px;
+    font-size: 0.9rem;
+}
+
+#slide-container.with-earthquake-bottom-banner .weather_time_grid,
+.slide-area.with-earthquake-bottom-banner .weather_time_grid {
+    margin-bottom: 6px;
+    padding-top: 7px;
+    font-size: 0.9rem;
+}
+
+#slide-container.with-earthquake-bottom-banner .weather_time,
+.slide-area.with-earthquake-bottom-banner .weather_time {
+    padding: 4px 2px;
+}
+
+#slide-container.with-earthquake-bottom-banner .weather_time_icon,
+.slide-area.with-earthquake-bottom-banner .weather_time_icon {
+    width: 34px;
+    height: 34px;
+    margin-top: 1px;
+    margin-bottom: 1px;
+}
+
+#slide-container.with-earthquake-bottom-banner .weather_time_msg,
+.slide-area.with-earthquake-bottom-banner .weather_time_msg {
+    min-height: 1.2em;
+    font-size: 0.78rem;
+}
+
+#slide-container.with-earthquake-bottom-banner .weather_time_temperature,
+.slide-area.with-earthquake-bottom-banner .weather_time_temperature {
+    margin-top: 1px;
+    font-size: 0.9rem;
+}
+
+#slide-container.with-earthquake-bottom-banner .weather_precipitation,
+.slide-area.with-earthquake-bottom-banner .weather_precipitation {
+    margin-top: 1px;
+    font-size: 0.72rem;
+}
+
+#slide-container.with-earthquake-bottom-banner .weather_temperature_graph,
+.slide-area.with-earthquake-bottom-banner .weather_temperature_graph {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    padding-top: 14px;
+    box-sizing: border-box;
+}
+
+#slide-container.with-earthquake-bottom-banner .weather_temperature_graph svg,
+.slide-area.with-earthquake-bottom-banner .weather_temperature_graph svg {
+    flex: 1 1 auto;
+    min-height: 0;
+    height: auto;
+}
 
 /** 明日の天気 */
 .weather_tomorrow {
@@ -447,6 +547,11 @@
 }
 
 .weather-warning-special {
+    color: #000;
+    background: #fff;
+}
+
+.weather-warning-danger {
     color: #fff;
     background: var(--deep-purple);
 }
@@ -478,4 +583,333 @@
     color: var(--snow-gray-text);
     font-size: 1rem;
     text-align: right;
+}
+
+/* 地震・津波・緊急地震速報 */
+.eew-slide,
+.tsunami-slide,
+.earthquake-slide,
+.disaster-main-inner {
+    color: #fff;
+}
+
+.eew-slide {
+    background: #b00020;
+}
+
+.tsunami-slide {
+    background: #7a2dff;
+}
+
+.eew-content,
+.tsunami-detail,
+.earthquake-detail {
+    gap: 18px;
+}
+
+.eew-main-title,
+.tsunami-lead,
+.quake-summary-main {
+    font-size: 2.4rem;
+    font-weight: bold;
+    line-height: 1.25;
+}
+
+.eew-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.eew-detail-grid > div {
+    padding: 14px 18px;
+    background: rgba(0, 0, 0, 0.22);
+    border: 1px solid rgba(255, 255, 255, 0.28);
+}
+
+.eew-detail-grid span {
+    display: block;
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 1rem;
+}
+
+.eew-detail-grid strong {
+    display: block;
+    margin-top: 4px;
+    font-size: 1.55rem;
+}
+
+.eew-area-list,
+.quake-point-list,
+.tsunami-detail-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.eew-area-item,
+.quake-point-item,
+.tsunami-area-item {
+    padding: 12px 16px;
+    background: rgba(0, 0, 0, 0.24);
+    border-left: 8px solid var(--sky-yellow);
+    font-size: 1.2rem;
+    font-weight: bold;
+}
+
+.eew-area-item,
+.quake-point-item {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.eew-area-item strong,
+.quake-point-item span {
+    color: var(--sky-yellow);
+}
+
+.tsunami-area-name {
+    font-size: 1.35rem;
+    font-weight: bold;
+}
+
+.tsunami-area-grade {
+    margin-top: 5px;
+    color: var(--sky-yellow);
+    font-size: 1.15rem;
+    font-weight: bold;
+}
+
+.tsunami-area-meta,
+.quake-summary-sub {
+    color: rgba(255, 255, 255, 0.86);
+    font-size: 1.25rem;
+    font-weight: bold;
+}
+
+.disaster-priority-slide {
+    padding: 0;
+    background: #000;
+}
+
+.disaster-main-area {
+    position: absolute;
+    inset: 0 0 86px 0;
+    overflow: hidden;
+}
+
+.disaster-main-inner {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 30px;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+.disaster-ticker {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 86px;
+    display: flex;
+    align-items: center;
+    background: #050505;
+    border-top: 3px solid var(--sky-yellow);
+    z-index: 30;
+}
+
+.disaster-ticker-label {
+    flex: 0 0 auto;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    padding: 0 22px;
+    background: var(--sky-yellow);
+    color: #000;
+    font-size: 1.25rem;
+    font-weight: bold;
+}
+
+.disaster-ticker-viewport {
+    flex: 1 1 auto;
+    overflow: hidden;
+    white-space: nowrap;
+}
+
+.disaster-ticker-track {
+    display: inline-block;
+    min-width: 100%;
+    padding-left: 100%;
+    font-size: 1.8rem;
+    font-weight: bold;
+    animation: disasterTicker 24s linear infinite;
+}
+
+.earthquake-bottom-banner {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+    display: flex;
+    align-items: stretch;
+    height: 112px;
+    min-height: 112px;
+    background: rgba(0, 0, 0, 0.96);
+    border-top: 3px solid var(--sky-yellow);
+    color: #fff;
+    font-weight: bold;
+    line-height: 1.25;
+}
+
+@keyframes disasterTicker {
+    from {
+        transform: translateX(0);
+    }
+    to {
+        transform: translateX(-100%);
+    }
+}
+
+#slide-container.with-earthquake-bottom-banner .slide,
+.slide-area.with-earthquake-bottom-banner .slide {
+    bottom: 122px;
+    padding-bottom: 18px;
+}
+
+.emergency-info-banner {
+    height: 112px;
+    min-height: 112px;
+}
+
+.emergency-info-label {
+    flex: 0 0 136px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 10px 0 10px 18px;
+    background: var(--sky-yellow);
+    color: #000;
+    font-size: 1.35rem;
+    font-weight: bold;
+    line-height: 1;
+}
+
+.emergency-info-banner.is-emergency-mode .emergency-info-label {
+    background: #d70000;
+    color: #fff;
+}
+
+.emergency-info-frame-viewport {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0 18px;
+    overflow: hidden;
+}
+
+.emergency-info-frame {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    grid-template-rows: auto auto;
+    align-content: center;
+    row-gap: 4px;
+    min-width: 0;
+    opacity: 0;
+    transform: translateY(10px);
+    transition: opacity 0.35s ease, transform 0.35s ease;
+    pointer-events: none;
+}
+
+.emergency-info-frame.is-active {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.emergency-info-line {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--sky-yellow);
+    font-size: 1.34rem;
+    font-weight: bold;
+    line-height: 1.05;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.emergency-info-line-bottom {
+    color: #fff;
+    font-size: 1.24rem;
+}
+
+.emergency-info-frame-b .emergency-info-line-bottom {
+    color: var(--mint-green);
+}
+.earthquake-fixed-layout {
+    gap: 12px;
+}
+
+.earthquake-points-viewport {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.earthquake-points-scroll {
+    min-height: auto;
+}
+
+.earthquake-intensity-groups {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding-bottom: 12px;
+}
+
+.quake-scale-group {
+    padding: 10px 14px;
+    background: rgba(0, 0, 0, 0.2);
+    border-left: 8px solid var(--sky-yellow);
+}
+
+.quake-scale-heading {
+    margin-bottom: 6px;
+    color: var(--sky-yellow);
+    font-size: 1.55rem;
+    font-weight: bold;
+}
+
+.quake-pref-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.quake-pref-line {
+    font-size: 1.22rem;
+    font-weight: bold;
+    line-height: 1.35;
+}
+
+.quake-pref-line span {
+    color: var(--mint-green);
+}
+
+.emergency-info-banner {
+    height: 96px;
+    min-height: 96px;
+    font-size: 1.22rem;
+}
+
+.emergency-info-banner > div {
+    min-width: 0;
+    text-overflow: ellipsis;
 }

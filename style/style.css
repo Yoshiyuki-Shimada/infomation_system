@@ -658,7 +658,7 @@ html {
 }
 
 .auto-scroll-content.is-scrolling {
-    animation: autoScroll var(--auto-scroll-duration, 24s) linear var(--auto-scroll-delay, 10s) forwards;
+    animation: autoScroll var(--auto-scroll-duration, 24s) linear var(--auto-scroll-delay, 0s) forwards;
 }
 
 @keyframes autoScroll {
