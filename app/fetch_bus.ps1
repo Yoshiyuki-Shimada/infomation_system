@@ -11,13 +11,108 @@ $temporaryPath = "$filePath.tmp"
 
 $northUrl = "https://oc.bus-vision.jp/osakacitybus/view/approachSpecifiedStop.html?stopCdSpecified=676&poleCdSpecified=90&lang=0"
 $southUrl = "https://oc.bus-vision.jp/osakacitybus/view/approachSpecifiedStop.html?stopCdSpecified=676&poleCdSpecified=80&lang=0"
+$timetableBaseUrl = "https://oc.bus-vision.jp/osakacitybus/view/"
 $userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
+$timetableCache = $null
+$timetableCacheFetchedAt = $null
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 function Ensure-TempDirectory {
     if (-not (Test-Path -LiteralPath $tempDir -PathType Container)) {
         New-Item -Path $tempDir -ItemType Directory -Force | Out-Null
+    }
+}
+
+function Get-TimetableUrl {
+    param(
+        [string]$PoleCode,
+        [string]$OperationDate
+    )
+
+    return "${timetableBaseUrl}diagram.html?stopCd=676&poleCd=$PoleCode&opeYmd=$OperationDate&timetableDateDivCd=-1&lang=0"
+}
+
+function Get-RouteKeyFromUrl {
+    param([string]$Url)
+
+    $routeMatch = [regex]::Match($Url, '(?:\?|&amp;|&)routeCd=([^&]+)')
+    $updownMatch = [regex]::Match($Url, '(?:\?|&amp;|&)updownCd=([^&]+)')
+    if (-not $routeMatch.Success -or -not $updownMatch.Success) {
+        return $null
+    }
+
+    return "$($routeMatch.Groups[1].Value)_$($updownMatch.Groups[1].Value)"
+}
+
+function Get-TimetableDetailLinks {
+    param([string[]]$HtmlList)
+
+    $links = @{}
+    foreach ($html in $HtmlList) {
+        foreach ($match in [regex]::Matches(
+            $html,
+            '(?is)<a\b(?=[^>]*\bid\s*=\s*["'']value["''])[^>]*\bhref\s*=\s*["'']([^"'']+)["''][^>]*>'
+        )) {
+            $href = [Net.WebUtility]::HtmlDecode($match.Groups[1].Value)
+            $key = Get-RouteKeyFromUrl $href
+            if ($key -and -not $links.ContainsKey($key)) {
+                $links[$key] = $href
+            }
+        }
+    }
+
+    return $links
+}
+
+function Get-HtmlElementTextById {
+    param(
+        [string]$Html,
+        [string]$Id
+    )
+
+    $pattern = '(?is)<[^>]*\bid\s*=\s*["'']' +
+        [regex]::Escape($Id) +
+        '["''][^>]*>(.*?)</[^>]+>'
+    $match = [regex]::Match($Html, $pattern)
+    if (-not $match.Success) { return "" }
+
+    $text = [regex]::Replace($match.Groups[1].Value, '<[^>]+>', ' ')
+    return [Net.WebUtility]::HtmlDecode($text).Trim()
+}
+
+function Get-OfficialTimetableData {
+    param([string]$OperationDate)
+
+    $northTimetableUrl = Get-TimetableUrl -PoleCode "90" -OperationDate $OperationDate
+    $southTimetableUrl = Get-TimetableUrl -PoleCode "80" -OperationDate $OperationDate
+    $northTimetableHtml = (Invoke-WebRequest -Uri $northTimetableUrl -UserAgent $userAgent -UseBasicParsing -TimeoutSec 20).Content
+    $southTimetableHtml = (Invoke-WebRequest -Uri $southTimetableUrl -UserAgent $userAgent -UseBasicParsing -TimeoutSec 20).Content
+
+    if ([string]::IsNullOrWhiteSpace($northTimetableHtml) -or [string]::IsNullOrWhiteSpace($southTimetableHtml)) {
+        throw "公式時刻表のHTMLが空です。"
+    }
+
+    $routeDetails = @{}
+    $detailLinks = Get-TimetableDetailLinks -HtmlList @($northTimetableHtml, $southTimetableHtml)
+    foreach ($entry in $detailLinks.GetEnumerator()) {
+        $detailUri = [Uri]::new([Uri]$timetableBaseUrl, $entry.Value).AbsoluteUri
+        $detailHtml = (Invoke-WebRequest -Uri $detailUri -UserAgent $userAgent -UseBasicParsing -TimeoutSec 15).Content
+        $routeName = Get-HtmlElementTextById -Html $detailHtml -Id "routeNm"
+        $destinationName = Get-HtmlElementTextById -Html $detailHtml -Id "destNm"
+        if ($routeName -and $destinationName) {
+            $routeDetails[$entry.Key] = @{
+                routeName = $routeName
+                destinationName = $destinationName
+            }
+        }
+    }
+
+    return @{
+        operationDate = $OperationDate
+        northHtml = $northTimetableHtml
+        southHtml = $southTimetableHtml
+        routeDetails = $routeDetails
     }
 }
 
@@ -95,6 +190,26 @@ while ($true) {
             throw "取得したHTMLが空です。"
         }
 
+        $operationDate = Get-Date -Format "yyyyMMdd"
+        $timetableCacheExpired = -not $timetableCacheFetchedAt -or
+            ((Get-Date) - $timetableCacheFetchedAt).TotalMinutes -ge 30
+        if (-not $timetableCache -or
+            $timetableCache.operationDate -ne $operationDate -or
+            $timetableCacheExpired) {
+            try {
+                $newTimetableCache = Get-OfficialTimetableData -OperationDate $operationDate
+                $timetableCache = $newTimetableCache
+                $timetableCacheFetchedAt = Get-Date
+                Write-Host "$(Get-Date -Format 'HH:mm:ss') 公式時刻表更新完了（$operationDate）"
+            }
+            catch {
+                if (-not $timetableCache -or $timetableCache.operationDate -ne $operationDate) {
+                    throw
+                }
+                Write-Host "$(Get-Date -Format 'HH:mm:ss') 公式時刻表の再取得失敗。前回データを継続使用: $($_.Exception.Message)" -ForegroundColor Yellow
+            }
+        }
+
         if (Test-HasDelayAtLeastThreeMinutes -HtmlList @($northHtml, $southHtml)) {
             $normalFetchSeconds = 15
         }
@@ -107,6 +222,10 @@ while ($true) {
             fetchedAt = (Get-Date).ToUniversalTime().ToString("o")
             northHtml = $northHtml
             southHtml = $southHtml
+            timetableDate = $timetableCache.operationDate
+            timetableNorthHtml = $timetableCache.northHtml
+            timetableSouthHtml = $timetableCache.southHtml
+            timetableRouteDetails = $timetableCache.routeDetails
             pollIntervalSeconds = $nextFetchSeconds
             reloadAfterSeconds = $nextFetchWaitSeconds
         }

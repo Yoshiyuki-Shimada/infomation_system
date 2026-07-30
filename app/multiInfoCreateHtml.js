@@ -778,7 +778,7 @@ function createEewHtml(eew) {
         .map(
             (area) => `
                 <div class="eew-area-item">
-                    <span>${escapeDisasterHtml(area.pref || area.name)}</span>
+                    <span>${escapeDisasterHtml(area.name || area.pref)}</span>
                     <strong>震度${escapeDisasterHtml(area.scaleText || "-")}</strong>
                 </div>
             `,
@@ -837,11 +837,11 @@ function getEarthquakeScaleGroups(q) {
         return q.scaleGroups;
     }
 
-    const scaleOrder = [70, 60, 55, 50, 45, 40, 30];
+    const scaleOrder = [70, 60, 55, 50, 45, 40, 30, 20, 10];
     const byScale = new Map();
     (q?.points || []).forEach((point) => {
         const scale = Number(point.scale || 0);
-        if (scale < 30) return;
+        if (scale < 10) return;
         if (!byScale.has(scale)) byScale.set(scale, new Map());
         const prefMap = byScale.get(scale);
         const pref = point.pref || "その他";
@@ -870,6 +870,8 @@ function convertScaleTextForDisplay(scale) {
         45: "5弱",
         40: "4",
         30: "3",
+        20: "2",
+        10: "1",
     };
     return map[scale] || String(scale || "-");
 }
@@ -903,21 +905,37 @@ function createEarthquakeHtml(q) {
     if (!q) return "";
     const bgClass = q.maxScale >= 60 ? "bg-red" : q.maxScale >= 45 ? "bg-yellow" : "bg-cyan";
     const intensityGroupsHtml = createEarthquakeIntensityGroupsHtml(q);
-
-    return `
-        <div class="slide earthquake-slide ${bgClass}">
-            <div class="slide-title">地震情報</div>
-            <div class="slide-content earthquake-detail earthquake-fixed-layout">
-                <div class="quake-summary-main">
-                    ${formatDisasterTime(q.time)}頃、${escapeDisasterHtml(q.hypocenter || "不明")}で地震がありました。<br>
-                    最大震度は${escapeDisasterHtml(q.maxScaleText || "-")}です。
-                </div>
-                <div class="quake-summary-sub">M${escapeDisasterHtml(q.magnitude || "-")}　深さ ${escapeDisasterHtml(q.depth || "-")}km　津波 ${escapeDisasterHtml(q.tsunami || "-")}</div>
+    const issueType = q.issueType || "";
+    const title = q.issueTypeLabel || "地震情報";
+    const isScalePrompt = issueType === "ScalePrompt";
+    const isDestination = issueType === "Destination";
+    const hasHypocenter = !!q.hypocenter;
+    const summary = isScalePrompt
+        ? `${formatDisasterTime(q.time)}頃、最大震度${escapeDisasterHtml(q.maxScaleText || "-")}を観測する地震がありました。`
+        : `${formatDisasterTime(q.time)}頃、${escapeDisasterHtml(q.hypocenter || "震源を調査中")}で地震がありました。${
+              q.maxScale > 0
+                  ? `<br>最大震度は${escapeDisasterHtml(q.maxScaleText || "-")}です。`
+                  : ""
+          }`;
+    const detailLine = hasHypocenter
+        ? `M${escapeDisasterHtml(q.magnitude || "-")}　深さ ${escapeDisasterHtml(q.depth || "-")}km　津波 ${escapeDisasterHtml(q.tsunami || "-")}`
+        : "震源や津波の有無は現在調査中です。";
+    const pointSection = intensityGroupsHtml
+        ? `
                 <div class="auto-scroll-viewport earthquake-points-viewport">
                     <div class="auto-scroll-content earthquake-points-scroll">
                         <div class="earthquake-intensity-groups">${intensityGroupsHtml}</div>
                     </div>
-                </div>
+                </div>`
+        : `<div class="quake-waiting-message">${isDestination ? "各地の震度情報を受信するまでお待ちください。" : "詳しい震度情報を確認中です。"}</div>`;
+
+    return `
+        <div class="slide earthquake-slide ${bgClass}">
+            <div class="slide-title">${escapeDisasterHtml(title)}</div>
+            <div class="slide-content earthquake-detail earthquake-fixed-layout">
+                <div class="quake-summary-main">${summary}</div>
+                <div class="quake-summary-sub">${detailLine}</div>
+                ${pointSection}
             </div>
         </div>
     `;
@@ -960,7 +978,9 @@ function createRailwayDisasterTickerHtml(railwayItems = []) {
 function createDisasterPriorityHtml(emergencyData, railwayItems = []) {
     if (!emergencyData) return "";
     let mainHtml = "";
-    if (emergencyData.eew) {
+    if (emergencyData.bulletin) {
+        mainHtml = createEarthquakeHtml(emergencyData.bulletin).replace('<div class="slide earthquake-slide ', '<div class="disaster-main-inner earthquake-slide ');
+    } else if (emergencyData.eew) {
         mainHtml = createEewHtml(emergencyData.eew).replace('<div class="slide eew-slide">', '<div class="disaster-main-inner eew-slide">').replace('</div>\n    ', '</div>\n    ');
     } else if (emergencyData.tsunami?.active) {
         mainHtml = createTsunamiHtml(emergencyData.tsunami).replace('<div class="slide tsunami-slide">', '<div class="disaster-main-inner tsunami-slide">');

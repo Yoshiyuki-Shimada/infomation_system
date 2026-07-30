@@ -97,14 +97,170 @@ function parseOnlineApproachHtml(html, direction) {
         .sort((a, b) => a.time.localeCompare(b.time));
 }
 
-function buildOnlineSchedule(northHtml, southHtml) {
+function getTimetableRouteKey(href) {
+    try {
+        const url = new URL(
+            href,
+            "https://oc.bus-vision.jp/osakacitybus/view/",
+        );
+        const routeCode = url.searchParams.get("routeCd");
+        const updownCode = url.searchParams.get("updownCd");
+        return routeCode && updownCode ? `${routeCode}_${updownCode}` : "";
+    } catch {
+        return "";
+    }
+}
+
+function parseOfficialTimetableHtml(html, direction, routeDetails = {}) {
+    if (!html) return [];
+    const documentData = new DOMParser().parseFromString(html, "text/html");
+    const buses = [];
+
+    documentData.querySelectorAll(".timetableLine").forEach((lineElement) => {
+        const hour = normalizeOnlineText(
+            lineElement.querySelector(".timetableHour #hour")?.textContent,
+        ).match(/\d{1,2}/)?.[0];
+        if (hour == null) return;
+
+        lineElement
+            .querySelectorAll(".timetableMinute a#value[href]")
+            .forEach((anchor) => {
+                const minute = normalizeOnlineText(
+                    anchor.querySelector("#label")?.textContent ||
+                        anchor.textContent,
+                ).match(/\d{1,2}/)?.[0];
+                const routeKey = getTimetableRouteKey(
+                    anchor.getAttribute("href"),
+                );
+                const detail = routeDetails[routeKey];
+                const routeName = normalizeOnlineText(detail?.routeName)
+                    .replace(/\s*号\s*$/, "");
+                const destinationName = normalizeOnlineText(
+                    detail?.destinationName,
+                ).replace(/\s*行\s*$/, "");
+
+                if (minute == null || !routeName || !destinationName) return;
+                buses.push({
+                    time: `${String(Number(hour)).padStart(2, "0")}:${String(Number(minute)).padStart(2, "0")}`,
+                    predictedTime: "",
+                    delayMinutes: 0,
+                    delayText: "",
+                    line: routeName,
+                    dir: direction,
+                    onlineDest: destinationName,
+                    suspensionFlg: false,
+                    lastFlg: false,
+                    msg: "",
+                    onlineFlg: false,
+                    timetableFlg: true,
+                });
+            });
+    });
+
+    return buses.sort((a, b) => a.time.localeCompare(b.time));
+}
+
+function getLastBusCategory(bus) {
+    const line = String(bus.line || "").toUpperCase();
+    if (bus.dir === "北" && line === "35A") return "35";
+    if (bus.dir === "南" && ["35A", "85"].includes(line)) return "35";
+    return line;
+}
+
+function markOfficialLastBuses(buses) {
+    const indexesByCategory = new Map();
+    buses.forEach((bus, index) => {
+        const category = getLastBusCategory(bus);
+        if (!indexesByCategory.has(category)) {
+            indexesByCategory.set(category, []);
+        }
+        indexesByCategory.get(category).push(index);
+    });
+
+    const lastIndexByCategory = new Map();
+    indexesByCategory.forEach((indexes, category) => {
+        const canonicalIndexes =
+            category === "35"
+                ? indexes.filter(
+                      (index) => String(buses[index].line).toUpperCase() === "35",
+                  )
+                : [];
+        const candidates = canonicalIndexes.length ? canonicalIndexes : indexes;
+        lastIndexByCategory.set(category, candidates[candidates.length - 1]);
+    });
+
+    return buses.map((bus, index) => ({
+        ...bus,
+        lastFlg: lastIndexByCategory.get(getLastBusCategory(bus)) === index,
+    }));
+}
+
+function getOnlineBusDestination(bus) {
+    return normalizeOnlineText(bus.onlineDest).replace(/\s*行\s*$/, "");
+}
+
+function doesOnlineBusMatchTimetable(onlineBus, timetableBus) {
+    return (
+        onlineBus.time === timetableBus.time &&
+        String(onlineBus.line) === String(timetableBus.line) &&
+        getOnlineBusDestination(onlineBus) ===
+            getOnlineBusDestination(timetableBus)
+    );
+}
+
+function mergeOnlineWithTimetable(onlineBuses, timetableBuses) {
+    const merged = timetableBuses.map((bus) => ({ ...bus }));
+
+    onlineBuses.forEach((onlineBus) => {
+        const timetableIndex = merged.findIndex((timetableBus) =>
+            doesOnlineBusMatchTimetable(onlineBus, timetableBus),
+        );
+        if (timetableIndex >= 0) {
+            const timetableBus = merged[timetableIndex];
+            merged[timetableIndex] = {
+                ...timetableBus,
+                ...onlineBus,
+                lastFlg: timetableBus.lastFlg || onlineBus.lastFlg,
+                timetableFlg: true,
+            };
+        } else {
+            merged.push(onlineBus);
+        }
+    });
+
+    return merged.sort((a, b) => a.time.localeCompare(b.time));
+}
+
+function buildOnlineSchedule(
+    northHtml,
+    southHtml,
+    timetableNorthHtml = "",
+    timetableSouthHtml = "",
+    timetableRouteDetails = {},
+) {
     const north = parseOnlineApproachHtml(northHtml, "北");
     const south = parseOnlineApproachHtml(southHtml, "南");
+    const northTimetable = markOfficialLastBuses(
+        parseOfficialTimetableHtml(
+            timetableNorthHtml,
+            "北",
+            timetableRouteDetails,
+        ),
+    );
+    const southTimetable = markOfficialLastBuses(
+        parseOfficialTimetableHtml(
+            timetableSouthHtml,
+            "南",
+            timetableRouteDetails,
+        ),
+    );
+    const northMerged = mergeOnlineWithTimetable(north, northTimetable);
+    const southMerged = mergeOnlineWithTimetable(south, southTimetable);
 
     return {
-        oikebashi: north,
-        kumata: south.filter((bus) => bus.line !== "13"),
-        abenobashi: south.filter((bus) => bus.line === "13"),
+        oikebashi: northMerged,
+        kumata: southMerged.filter((bus) => bus.line !== "13"),
+        abenobashi: southMerged.filter((bus) => bus.line === "13"),
     };
 }
 
@@ -114,6 +270,9 @@ function registerOnlineBusHtml(payload) {
         const schedule = buildOnlineSchedule(
             payload.northHtml,
             payload.southHtml,
+            payload.timetableNorthHtml,
+            payload.timetableSouthHtml,
+            payload.timetableRouteDetails,
         );
         if (Number.isNaN(fetchedAt.getTime())) {
             throw new Error("オンラインバスデータの取得日時が不正です。");
