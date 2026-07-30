@@ -690,6 +690,14 @@
     font-weight: bold;
 }
 
+.quake-waiting-message {
+    padding: 24px;
+    background: rgba(0, 0, 0, 0.2);
+    border-left: 8px solid var(--sky-yellow);
+    font-size: 1.5rem;
+    font-weight: bold;
+}
+
 .disaster-priority-slide {
     padding: 0;
     background: #000;

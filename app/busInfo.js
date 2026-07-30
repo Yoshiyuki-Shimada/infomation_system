@@ -312,6 +312,19 @@ function pickBusDisplayInfo(
 
     return statusInfo || lastInfo || suspensionInfo || delayInfo || remainingInfo;
 }
+
+function getTimetableFallbackStatus(bus, cycleSeconds) {
+    if (bus.timetableFlg !== true || bus.onlineFlg === true) {
+        return null;
+    }
+
+    if (bus.lastFlg && cycleSeconds >= 6) {
+        return { text: "最終", color: "#e02135" };
+    }
+
+    return { text: "運行情報取得待ち", color: "#8c8f93" };
+}
+
 function renderBusList(id, buses, now, opDate, maxDisplay) {
     const el = document.getElementById(id);
     if (!el) return;
@@ -348,7 +361,12 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
     }
 
     if (displayBuses.length === 0) {
-        el.innerHTML = '<div class="no-bus">★ 本日のバスは終了しました ★</div>';
+        el.innerHTML = `
+            <div class="no-bus">
+                <div class="no-bus-ja">本日の運行は終了しました</div>
+                <div class="no-bus-en">The Service of today was finished</div>
+            </div>
+        `;
         return;
     }
 
@@ -391,6 +409,11 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
             let imgName = "";
             let via_color = "#8c8f93";
             let status_color = "#e02135";
+            const timetableFallbackStatus = getTimetableFallbackStatus(
+                bus,
+                cycleSeconds,
+            );
+            const isWaitingForOnlineInfo = !!timetableFallbackStatus;
             const hasMajorDelay = bus.onlineFlg && Number(bus.delayMinutes) >= 5;
             const predictedSeconds = pureSeconds;
             const delayStatusInfo =
@@ -485,6 +508,11 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
                 status_color = displayInfo.color;
             }
 
+            if (isWaitingForOnlineInfo) {
+                status = timetableFallbackStatus.text;
+                status_color = timetableFallbackStatus.color;
+            }
+
             if (bus.suspensionFlg) {
                 imgName = "suspension.png";
             } else if (showSoon) {
@@ -497,6 +525,9 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
                 else if (diff <= 7) imgName = "run.png";
                 else if (diff <= 8) imgName = "walk_fast.png";
                 else imgName = "walk.png";
+            }
+            if (isWaitingForOnlineInfo) {
+                imgName = "";
             }
             if (
                 engMode == engVisible.bus_msg &&
