@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>システムアップデート中</title>
+    <style>
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            background: #05070b;
+            color: #fff;
+            font-family: "Yu Gothic", "Meiryo", sans-serif;
+            overflow: hidden;
+        }
+
+        .screen {
+            box-sizing: border-box;
+            width: 100%;
+            height: 100%;
+            display: grid;
+            place-items: center;
+            padding: 56px;
+            background:
+                linear-gradient(90deg, rgba(0, 188, 255, 0.18), transparent 35%, transparent 65%, rgba(255, 230, 102, 0.12)),
+                #05070b;
+        }
+
+        .panel {
+            width: min(1100px, 92vw);
+            border-top: 8px solid #00bfff;
+            border-bottom: 8px solid #ffe766;
+            padding: 52px 64px;
+            background: rgba(0, 0, 0, 0.72);
+        }
+
+        .label {
+            display: inline-block;
+            background: #ffe766;
+            color: #000;
+            font-size: 32px;
+            font-weight: 900;
+            padding: 10px 22px;
+            margin-bottom: 28px;
+        }
+
+        h1 {
+            margin: 0 0 22px;
+            font-size: 72px;
+            line-height: 1.1;
+            letter-spacing: 0;
+        }
+
+        .message {
+            font-size: 34px;
+            font-weight: 700;
+            line-height: 1.55;
+            color: #e8f7ff;
+        }
+
+        .detail {
+            margin-top: 28px;
+            font-size: 24px;
+            line-height: 1.5;
+            color: #b9c7d8;
+        }
+
+        .bar {
+            width: 100%;
+            height: 18px;
+            margin-top: 42px;
+            background: #1b2638;
+            overflow: hidden;
+        }
+
+        .bar::before {
+            content: "";
+            display: block;
+            width: 34%;
+            height: 100%;
+            background: linear-gradient(90deg, #00bfff, #ffe766);
+            animation: loading 1.45s linear infinite;
+        }
+
+        @keyframes loading {
+            from { transform: translateX(-100%); }
+            to { transform: translateX(300%); }
+        }
+    </style>
+</head>
+<body>
+    <main class="screen">
+        <section class="panel">
+            <div class="label">システム更新</div>
+            <h1>アップデート中</h1>
+            <div class="message" id="status-message">システムを更新しています。</div>
+            <div class="detail" id="status-detail">完了後、自動的に再起動します。電源を切らないでください。</div>
+            <div class="bar" aria-hidden="true"></div>
+        </section>
+    </main>
+
+    <script>
+        function loadStatus() {
+            const oldScript = document.getElementById("update-status-script");
+            if (oldScript) oldScript.remove();
+
+            const script = document.createElement("script");
+            script.id = "update-status-script";
+            script.src = `temp/update_status.js?t=${Date.now()}`;
+            script.onload = () => {
+                const status = window.systemUpdateStatus || {};
+                document.getElementById("status-message").textContent =
+                    status.message || "システムを更新しています。";
+                document.getElementById("status-detail").textContent =
+                    status.detail || "完了後、自動的に再起動します。電源を切らないでください。";
+            };
+            document.body.appendChild(script);
+        }
+
+        loadStatus();
+        setInterval(loadStatus, 1000);
+    </script>
+</body>
+</html>

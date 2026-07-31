@@ -190,60 +190,6 @@ function Get-EmergencyUntil {
     return $null
 }
 
-function Get-QuakeIssueTypeLabel {
-    param([string]$Type)
-    switch ($Type) {
-        "ScalePrompt" { "震度速報" }
-        "Destination" { "震源速報" }
-        "DetailScale" { "各地の震度情報" }
-        default { "地震情報" }
-    }
-}
-
-function Get-ActiveQuakeBulletin {
-    param(
-        [array]$QuakeList,
-        $Eew,
-        [datetime]$Now
-    )
-
-    $bulletins = @($QuakeList | Where-Object {
-        $_ -and $_.issue.type -in @("ScalePrompt", "Destination", "DetailScale")
-    })
-    if ($bulletins.Count -eq 0) { return $null }
-
-    $significantOrigins = @($bulletins | Where-Object {
-        $_.issue.type -in @("ScalePrompt", "DetailScale") -and
-        $null -ne $_.earthquake.maxScale -and
-        [int]$_.earthquake.maxScale -ge 30
-    } | ForEach-Object {
-        $origin = Parse-QuakeTime $_.earthquake.time
-        if ($origin) { $origin.ToString("yyyyMMddHHmm") }
-    } | Select-Object -Unique)
-
-    $eewOrigin = if ($Eew) { Parse-QuakeTime $Eew.originTime } else { $null }
-    $eewIssue = if ($Eew) { Parse-QuakeTime $Eew.issueTime } else { $null }
-    $recentStart = $Now.AddMinutes(-10)
-
-    $candidates = @($bulletins | Where-Object {
-        $issueTime = Parse-QuakeTime $_.issue.time
-        $origin = Parse-QuakeTime $_.earthquake.time
-        if (-not $issueTime -or -not $origin -or $issueTime -lt $recentStart) { return $false }
-
-        if ($eewOrigin) {
-            return [Math]::Abs(($origin - $eewOrigin).TotalSeconds) -le 120 -and
-                (-not $eewIssue -or $issueTime -ge $eewIssue)
-        }
-
-        return $significantOrigins -contains $origin.ToString("yyyyMMddHHmm")
-    })
-
-    if ($candidates.Count -eq 0) { return $null }
-    return $candidates |
-        Sort-Object @{Expression={ Parse-QuakeTime $_.issue.time }; Descending=$true} |
-        Select-Object -First 1
-}
-
 function Convert-QuakePayload {
     param($Quake)
     if (-not $Quake) { return $null }
@@ -253,17 +199,16 @@ function Convert-QuakePayload {
     $maxScale = if ($null -ne $Quake.earthquake.maxScale) { [int]$Quake.earthquake.maxScale } else { 0 }
     $ikuno = $Quake.points | Where-Object { $_.addr -match "生野区" } | Sort-Object scale -Descending | Select-Object -First 1
     $ikunoScale = if ($ikuno) { [int]$ikuno.scale } else { 0 }
-    $topPoints = @($Quake.points | Where-Object { $_.scale -ge 10 } | Sort-Object @{Expression="scale"; Descending=$true}, pref, addr | ForEach-Object {
+    $topPoints = @($Quake.points | Where-Object { $_.scale -ge 30 } | Sort-Object @{Expression="scale"; Descending=$true}, pref, addr | ForEach-Object {
         [pscustomobject]@{
             pref = $_.pref
             addr = $_.addr
             scale = [int]$_.scale
             scaleText = Convert-ScaleText ([int]$_.scale)
-            isArea = [bool]$_.isArea
         }
     })
     $scaleGroups = @()
-    foreach ($scaleValue in @(70, 60, 55, 50, 45, 40, 30, 20, 10)) {
+    foreach ($scaleValue in @(70, 60, 55, 50, 45, 40, 30)) {
         $scalePoints = @($topPoints | Where-Object { $_.scale -eq $scaleValue })
         if ($scalePoints.Count -eq 0) { continue }
         $prefGroups = @($scalePoints | Group-Object pref | Sort-Object Name | ForEach-Object {
@@ -283,8 +228,6 @@ function Convert-QuakePayload {
         id = $Quake.id
         time = $Quake.earthquake.time
         issueTime = $Quake.issue.time
-        issueType = $Quake.issue.type
-        issueTypeLabel = Get-QuakeIssueTypeLabel $Quake.issue.type
         hypocenter = $Quake.earthquake.hypocenter.name
         maxScale = $maxScale
         maxScaleText = Convert-ScaleText $maxScale
@@ -421,8 +364,6 @@ while ($true) {
 
     $eew = Convert-EewPayload $eewRaw
     if ($eew) { Start-EewAudio $eew }
-    $activeBulletinRaw = Get-ActiveQuakeBulletin -QuakeList $quakeRaw -Eew $eew -Now $now
-    $activeBulletin = Convert-QuakePayload $activeBulletinRaw
 
     $displayQuakeRaw = $null
     $emergencyQuakeRaw = $null
@@ -483,10 +424,9 @@ while ($true) {
         $localQuakePriority = $quake.ikunoScale -ge 30 -and $origin -and $now -le $origin.AddHours(1)
     }
 
-    $priorityMode = if ($activeBulletin -or $eew -or $tsunami.active -or $localQuakePriority) { "disaster" } elseif ($quake -or $emergencyActive) { "bottom" } else { "normal" }
+    $priorityMode = if ($eew -or $tsunami.active -or $localQuakePriority) { "disaster" } elseif ($quake -or $emergencyActive) { "bottom" } else { "normal" }
     $payloadCore = [ordered]@{
         eew = $eew
-        bulletin = $activeBulletin
         earthquake = $quake
         emergencyEarthquake = $emergencyEarthquake
         recentScale3Earthquake = $recentScale3Earthquake
@@ -504,7 +444,6 @@ while ($true) {
         $payload = [ordered]@{
             updateTime = (Get-Date -Format "yyyy/MM/dd HH:mm:ss")
             eew = $payloadCore.eew
-            bulletin = $payloadCore.bulletin
             earthquake = $payloadCore.earthquake
             emergencyEarthquake = $payloadCore.emergencyEarthquake
             recentScale3Earthquake = $payloadCore.recentScale3Earthquake

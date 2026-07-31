@@ -20,7 +20,7 @@ wmic process where "commandline like '%%play_eew_sequence.ps1%%'" call terminate
 
 :: ニュース・気象情報などを自動取得プログラムを「隠しウィンドウ」でバックグラウンド起動
 :: 5分おきにファイルを書き換え続けます
-::start /min powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File "../app/fetch_news.ps1"
+start "" /min powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File "%PARENT_DIR%\app\fetch_news.ps1"
 
 :: 大阪シティバスのオンライン接近情報を30秒ごとに取得
 start "" /min powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File "%PARENT_DIR%\app\fetch_bus.ps1"
@@ -33,6 +33,9 @@ start "" /min powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File "%PAR
 
 :: [3] インターネット接続確認アプリ起動
 start "" /min powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File "%PARENT_DIR%\network_check\network_check.ps1"
+
+:: システムアップデート要求の常時監視
+start "" /min powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File "%PARENT_DIR%\bin\update_agent.ps1"
 
 :: 地震・津波・緊急地震速報の常時監視
 start "" /min powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File "%PARENT_DIR%\earthquake\earthquake_monitor.ps1"

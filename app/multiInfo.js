@@ -283,9 +283,6 @@ function importTsunamiData() {
 
 function importEarthquakeData() {
     const activeEarthquakeData = getActiveEarthquakeData();
-    if (activeEarthquakeData?.bulletin) {
-        emergencyList.push(createEarthquakeHtml(activeEarthquakeData.bulletin));
-    }
     if (activeEarthquakeData?.eew) {
         emergencyList.push(createEewHtml(activeEarthquakeData.eew));
     }

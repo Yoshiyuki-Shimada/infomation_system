@@ -1,0 +1,6 @@
+{
+  "watchPath": "C:\\infomation_system_updates\\inbox",
+  "pollSeconds": 5,
+  "restartAfterUpdate": true,
+  "authToken": "ここにメインPCと実行PCで同じ長い合言葉を設定"
+}

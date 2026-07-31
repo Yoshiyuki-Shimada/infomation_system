@@ -27,6 +27,13 @@ function parseOnlineTime(passTimeText) {
     };
 }
 
+function normalizeOnlineTime(value) {
+    const match = normalizeOnlineText(value).match(/^(\d{1,2}):(\d{2})$/);
+    if (!match) return normalizeOnlineText(value);
+
+    return `${String(Number(match[1])).padStart(2, "0")}:${match[2]}`;
+}
+
 function parseDelayMinutes(passInfoText, scheduledTime, predictedTime) {
     const infoMatch = normalizeOnlineText(passInfoText).match(
         /約?\s*(\d+)\s*分遅れ/,
@@ -79,8 +86,8 @@ function parseOnlineApproachHtml(html, direction) {
             if (!line || !dest || !timeData.scheduledTime) return null;
 
             return {
-                time: timeData.scheduledTime,
-                predictedTime: timeData.predictedTime,
+                time: normalizeOnlineTime(timeData.scheduledTime),
+                predictedTime: normalizeOnlineTime(timeData.predictedTime),
                 delayMinutes,
                 delayText:
                     delayMinutes >= 5 ? `約${delayMinutes}分遅れ` : "",
@@ -91,6 +98,7 @@ function parseOnlineApproachHtml(html, direction) {
                 lastFlg: /最終/.test(allText),
                 msg: "",
                 onlineFlg: true,
+                serviceUnavailableFlg: false,
             };
         })
         .filter(Boolean)
@@ -105,7 +113,10 @@ function getTimetableRouteKey(href) {
         );
         const routeCode = url.searchParams.get("routeCd");
         const updownCode = url.searchParams.get("updownCd");
-        return routeCode && updownCode ? `${routeCode}_${updownCode}` : "";
+        const lineCode = url.searchParams.get("lineCd");
+        return lineCode && routeCode && updownCode
+            ? `${lineCode}_${routeCode}_${updownCode}`
+            : "";
     } catch {
         return "";
     }
@@ -153,6 +164,7 @@ function parseOfficialTimetableHtml(html, direction, routeDetails = {}) {
                     msg: "",
                     onlineFlg: false,
                     timetableFlg: true,
+                    serviceUnavailableFlg: true,
                 });
             });
     });
@@ -160,49 +172,70 @@ function parseOfficialTimetableHtml(html, direction, routeDetails = {}) {
     return buses.sort((a, b) => a.time.localeCompare(b.time));
 }
 
-function getLastBusCategory(bus) {
-    const line = String(bus.line || "").toUpperCase();
-    if (bus.dir === "北" && line === "35A") return "35";
-    if (bus.dir === "南" && ["35A", "85"].includes(line)) return "35";
-    return line;
+function hasLaterOfficialBus(buses, targetBus, predicate) {
+    return buses.some((bus) => {
+        if (bus.time <= targetBus.time) return false;
+        return predicate(bus);
+    });
 }
 
 function markOfficialLastBuses(buses) {
-    const indexesByCategory = new Map();
-    buses.forEach((bus, index) => {
-        const category = getLastBusCategory(bus);
-        if (!indexesByCategory.has(category)) {
-            indexesByCategory.set(category, []);
+    return buses.map((bus) => {
+        const line = String(bus.line || "").toUpperCase();
+        const dest = getOnlineBusDestination(bus);
+        const hasSameLineAndDestinationLater = hasLaterOfficialBus(
+            buses,
+            bus,
+            (laterBus) =>
+                String(laterBus.line || "").toUpperCase() === line &&
+                getOnlineBusDestination(laterBus) === dest,
+        );
+        let lastFlg = !hasSameLineAndDestinationLater;
+
+        if (
+            bus.dir === "北" &&
+            line === "35A" &&
+            dest === "地下鉄今里" &&
+            hasLaterOfficialBus(
+                buses,
+                bus,
+                (laterBus) =>
+                    String(laterBus.line || "").toUpperCase() === "35" &&
+                    getOnlineBusDestination(laterBus) === "守口車庫前",
+            )
+        ) {
+            lastFlg = false;
         }
-        indexesByCategory.get(category).push(index);
-    });
 
-    const lastIndexByCategory = new Map();
-    indexesByCategory.forEach((indexes, category) => {
-        const canonicalIndexes =
-            category === "35"
-                ? indexes.filter(
-                      (index) => String(buses[index].line).toUpperCase() === "35",
-                  )
-                : [];
-        const candidates = canonicalIndexes.length ? canonicalIndexes : indexes;
-        lastIndexByCategory.set(category, candidates[candidates.length - 1]);
-    });
+        if (
+            bus.dir === "南" &&
+            ["35A", "85"].includes(line) &&
+            dest === "杭全" &&
+            hasLaterOfficialBus(
+                buses,
+                bus,
+                (laterBus) =>
+                    String(laterBus.line || "").toUpperCase() === "35" &&
+                    getOnlineBusDestination(laterBus) === "杭全",
+            )
+        ) {
+            lastFlg = false;
+        }
 
-    return buses.map((bus, index) => ({
-        ...bus,
-        lastFlg: lastIndexByCategory.get(getLastBusCategory(bus)) === index,
-    }));
+        return { ...bus, lastFlg };
+    });
 }
 
 function getOnlineBusDestination(bus) {
-    return normalizeOnlineText(bus.onlineDest).replace(/\s*行\s*$/, "");
+    return normalizeOnlineText(bus.onlineDest).replace(/\s*行き?\s*$/, "");
 }
 
 function doesOnlineBusMatchTimetable(onlineBus, timetableBus) {
     return (
-        onlineBus.time === timetableBus.time &&
+        normalizeOnlineTime(onlineBus.time) ===
+            normalizeOnlineTime(timetableBus.time) &&
         String(onlineBus.line) === String(timetableBus.line) &&
+        String(onlineBus.dir || "") === String(timetableBus.dir || "") &&
         getOnlineBusDestination(onlineBus) ===
             getOnlineBusDestination(timetableBus)
     );
@@ -222,6 +255,7 @@ function mergeOnlineWithTimetable(onlineBuses, timetableBuses) {
                 ...onlineBus,
                 lastFlg: timetableBus.lastFlg || onlineBus.lastFlg,
                 timetableFlg: true,
+                serviceUnavailableFlg: false,
             };
         } else {
             merged.push(onlineBus);
