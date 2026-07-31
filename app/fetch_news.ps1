@@ -24,6 +24,38 @@ $privateLineIds = @(
     "7", "8" #東海道・山陽新幹線
 )
 
+function Get-YahooRailwayColor {
+    param(
+        [string]$Message
+    )
+
+    $msg = [string]$Message
+
+    # 「見合わせておりましたが、運転再開しています」は再開済みとして黄色にする。
+    # 「運転再開見込み」はまだ見合わせ中なので、この判定には含めない。
+    if ($msg -match "運転再開しています|運転を再開しています|運転再開しました|運転を再開しました|運転を再開して|運転再開済|再開しています|再開しました|再開済|運転を再開") {
+        return "yellow"
+    }
+
+    if ($msg -match "見合わせ|停止") {
+        return "red"
+    }
+
+    if ($msg -match "再開|遅れ|遅延|遅れや運休|一部列車に運休|一部列車運休|部分運休") {
+        return "yellow"
+    }
+
+    if ($msg -match "可能性|お知らせ|計画") {
+        return "orange"
+    }
+
+    if ($msg -match "取り止め|運休") {
+        return "red"
+    }
+
+    return "yellow"
+}
+
 
 while ($true) {
     $data = @{
@@ -559,20 +591,7 @@ while ($true) {
                             $yCol = "yellow" 
                             Write-Host "状況:$yMsg"
                             
-                            # 判定ロジック
-                            if ($yMsg -match "見合わせ|停止") {
-                                $yCol = "red"
-                            }
-                            elseif ($yMsg -match "再開|遅れ|遅延|遅れや運休|一部列車に運休|一部列車運休|部分運休") {
-                                $yCol = "yellow"
-                            }
-                            elseif ($yMsg -match "可能性|お知らせ|計画") {
-                                $yCol = "orange"
-                            
-                            }
-                            elseif ($yMsg -match "取り止め|運休") {
-                                $yCol = "red"
-                            }
+                            $yCol = Get-YahooRailwayColor -Message $yMsg
 
 
                             $data.railway += @{ 

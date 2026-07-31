@@ -1,3 +1,7 @@
 temp/bus_online.js
 temp/imazato_liner_online.js
 temp/news_data.js
+temp/
+_update/
+bin/update_config.json
+time/audio_backup_before_normalize_*/

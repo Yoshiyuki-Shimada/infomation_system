@@ -36,13 +36,14 @@ function Get-TimetableUrl {
 function Get-RouteKeyFromUrl {
     param([string]$Url)
 
+    $lineMatch = [regex]::Match($Url, '(?:\?|&amp;|&)lineCd=([^&]+)')
     $routeMatch = [regex]::Match($Url, '(?:\?|&amp;|&)routeCd=([^&]+)')
     $updownMatch = [regex]::Match($Url, '(?:\?|&amp;|&)updownCd=([^&]+)')
-    if (-not $routeMatch.Success -or -not $updownMatch.Success) {
+    if (-not $lineMatch.Success -or -not $routeMatch.Success -or -not $updownMatch.Success) {
         return $null
     }
 
-    return "$($routeMatch.Groups[1].Value)_$($updownMatch.Groups[1].Value)"
+    return "$($lineMatch.Groups[1].Value)_$($routeMatch.Groups[1].Value)_$($updownMatch.Groups[1].Value)"
 }
 
 function Get-TimetableDetailLinks {
@@ -194,7 +195,7 @@ while ($true) {
         $timetableCacheExpired = -not $timetableCacheFetchedAt -or
             ((Get-Date) - $timetableCacheFetchedAt).TotalMinutes -ge 30
         if (-not $timetableCache -or
-            $timetableCache.operationDate -ne $operationDate -or
+            $timetableCache["operationDate"] -ne $operationDate -or
             $timetableCacheExpired) {
             try {
                 $newTimetableCache = Get-OfficialTimetableData -OperationDate $operationDate
@@ -203,7 +204,7 @@ while ($true) {
                 Write-Host "$(Get-Date -Format 'HH:mm:ss') 公式時刻表更新完了（$operationDate）"
             }
             catch {
-                if (-not $timetableCache -or $timetableCache.operationDate -ne $operationDate) {
+                if (-not $timetableCache -or $timetableCache["operationDate"] -ne $operationDate) {
                     throw
                 }
                 Write-Host "$(Get-Date -Format 'HH:mm:ss') 公式時刻表の再取得失敗。前回データを継続使用: $($_.Exception.Message)" -ForegroundColor Yellow
@@ -222,14 +223,14 @@ while ($true) {
             fetchedAt = (Get-Date).ToUniversalTime().ToString("o")
             northHtml = $northHtml
             southHtml = $southHtml
-            timetableDate = $timetableCache.operationDate
-            timetableNorthHtml = $timetableCache.northHtml
-            timetableSouthHtml = $timetableCache.southHtml
-            timetableRouteDetails = $timetableCache.routeDetails
+            timetableDate = $timetableCache["operationDate"]
+            timetableNorthHtml = $timetableCache["northHtml"]
+            timetableSouthHtml = $timetableCache["southHtml"]
+            timetableRouteDetails = $timetableCache["routeDetails"]
             pollIntervalSeconds = $nextFetchSeconds
             reloadAfterSeconds = $nextFetchWaitSeconds
         }
-        $json = $payload | ConvertTo-Json -Compress
+        $json = $payload | ConvertTo-Json -Compress -Depth 8
         $javascript = "registerOnlineBusHtml($json);"
 
         # ネットワーク監視処理などによりtempが削除されていても再作成する

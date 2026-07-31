@@ -191,7 +191,7 @@ function sortBusesByDisplayTime(buses, now, baseDate) {
 function normalizeDestinationName(value) {
     return String(value || "")
         .replace(/\s+/g, "")
-        .replace(/行$/, "");
+        .replace(/行き?$/, "");
 }
 
 function getBusDestination(bus) {
@@ -201,30 +201,55 @@ function getBusDestination(bus) {
     return normalizeDestinationName(routeInfo?.dest);
 }
 
-function doesOfflineLastBusMatch(onlineBus, offlineBus) {
+function doesScheduleBusMatch(busA, busB) {
     return (
-        offlineBus.lastFlg === true &&
-        onlineBus.time === offlineBus.time &&
-        String(onlineBus.line) === String(offlineBus.line) &&
-        getBusDestination(onlineBus) === getBusDestination(offlineBus)
+        busA.time === busB.time &&
+        String(busA.line) === String(busB.line) &&
+        String(busA.dir || "") === String(busB.dir || "") &&
+        getBusDestination(busA) === getBusDestination(busB)
     );
 }
 
-function inheritOfflineLastFlags(onlineSchedule, offlineSchedule) {
+function mergeOnlineWithOfflineFallback(onlineBuses, offlineBuses) {
+    const merged = (onlineBuses || []).map((onlineBus) => {
+        const offlineMatch = (offlineBuses || []).find((offlineBus) =>
+            doesScheduleBusMatch(onlineBus, offlineBus),
+        );
+
+        return {
+            ...onlineBus,
+            lastFlg: onlineBus.lastFlg || offlineMatch?.lastFlg === true,
+        };
+    });
+
+    (offlineBuses || []).forEach((offlineBus) => {
+        if (
+            merged.some((onlineBus) =>
+                doesScheduleBusMatch(onlineBus, offlineBus),
+            )
+        ) {
+            return;
+        }
+
+        merged.push({
+            ...offlineBus,
+            onlineFlg: false,
+            timetableFlg: true,
+        });
+    });
+
+    return merged;
+}
+
+function mergeOnlineScheduleWithOfflineFallback(onlineSchedule, offlineSchedule) {
     const groupNames = ["oikebashi", "kumata", "abenobashi"];
     const result = {};
 
     for (const groupName of groupNames) {
         const offlineBuses = offlineSchedule[groupName] || [];
-        result[groupName] = (onlineSchedule[groupName] || []).map(
-            (onlineBus) => ({
-                ...onlineBus,
-                lastFlg:
-                    onlineBus.lastFlg ||
-                    offlineBuses.some((offlineBus) =>
-                        doesOfflineLastBusMatch(onlineBus, offlineBus),
-                    ),
-            }),
+        result[groupName] = mergeOnlineWithOfflineFallback(
+            onlineSchedule[groupName] || [],
+            offlineBuses,
         );
     }
 
@@ -248,13 +273,12 @@ function refresh() {
     const onlinePollIntervalSeconds = onlineSchedule
         ? getOnlineBusPollIntervalSeconds()
         : null;
-    const offlineSchedule = displaySchedule.schedule;
     const schedule = onlineSchedule
         ? {
-              ...offlineSchedule,
-              ...inheritOfflineLastFlags(onlineSchedule, offlineSchedule),
+              ...displaySchedule.schedule,
+              ...onlineSchedule,
           }
-        : offlineSchedule;
+        : displaySchedule.schedule;
 
     const onlineUpdateTime = onlineFetchedAt
         ? `${String(onlineFetchedAt.getHours()).padStart(2, "0")}:${String(onlineFetchedAt.getMinutes()).padStart(2, "0")}`
@@ -322,7 +346,7 @@ function getTimetableFallbackStatus(bus, cycleSeconds) {
         return { text: "最終", color: "#e02135" };
     }
 
-    return { text: "運行情報取得待ち", color: "#8c8f93" };
+    return { text: "運行情報未取得", color: "#8c8f93" };
 }
 
 function renderBusList(id, buses, now, opDate, maxDisplay) {
@@ -395,7 +419,9 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
                 msg1: "",
                 msg2: "",
             };
-            const destination = bus.onlineDest || info.dest;
+            const destination = normalizeDestinationName(
+                bus.onlineDest || info.dest,
+            );
 
             const diff = calculateDiff(bus.time, now, opDate).minutes;
             const diff_sec = calculateDiff(bus.time, now, opDate).seconds;
