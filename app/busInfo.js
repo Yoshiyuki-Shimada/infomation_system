@@ -6,6 +6,20 @@ const engVisible = {
     msg2: 4,
     bus_msg: 5,
 };
+const OBON_SATURDAY_DATE_KEYS = ["2026-08-13", "2026-08-14"];
+
+const transferGuideMessages = {
+    "35_北": "地下鉄千日前線・今里筋線は、「地下鉄今里」で。地下鉄中央線は、「地下鉄緑橋」で。JR学研都市線・おおさか東線は、「鴫野駅前」で。地下鉄長堀鶴見緑地線は、「地下鉄蒲生四丁目」で。京阪線は、「地下鉄関目成育」で。地下鉄谷町線は、「高殿」でお乗り換えください。",
+    "35A_北": "地下鉄千日前線・今里筋線は、「地下鉄今里」でお乗り換えください。",
+    "85_北": "地下鉄千日前線・今里筋線は、「地下鉄今里」で。地下鉄長堀鶴見緑地線・JR環状線は、「玉造」で。地下鉄谷町線は、「谷町六丁目」で。地下鉄堺筋線は、「長堀橋」で。地下鉄御堂筋線・四つ橋線は、「心斎橋」で。近鉄難波線・阪神なんば線・南海線は、「なんば」でお乗り換えください。",
+    "73_北": "JR環状線は、「桃谷駅前」で。地下鉄千日前線・近鉄難波線・奈良線・大阪線は「鶴橋駅前」で。地下鉄谷町線は、「谷町九丁目」で。地下鉄堺筋線は、「日本橋一丁目」で。地下鉄御堂筋線・四つ橋線・阪神なんば線・南海線は、「なんば」でお乗り換えください。",
+    "35_南": "JR大和路線は「杭全」でお乗り換えください。",
+    "35A_南": "JR大和路線は「杭全」でお乗り換えください。",
+    "85_南": "JR大和路線は「杭全」でお乗り換えください。",
+    "13_北": "地下鉄千日前線は「北巽バスターミナル」でお乗り換えください。",
+    "73_南": "JR大和路線は「杭全」で。地下鉄谷町線は、「地下鉄平野」でお乗り換えください。",
+    "13_南": "JR環状線は、「寺田町駅前」で。地下鉄御堂筋線・谷町線・JR阪和線・JR大和路線・近鉄南大阪線・阪堺線は、「あべの橋」でお乗り換えください。",
+};
 
 /**
  * 日本の祝日判定ロジック (2026年)
@@ -46,6 +60,7 @@ function isJapaneseHoliday(date) {
  * 指定された日付からダイヤの種類を判定する
  */
 function getScheduleType(date) {
+    if (OBON_SATURDAY_DATE_KEYS.includes(formatDateKey(date))) return "saturday";
     if (isJapaneseHoliday(date)) return "holiday";
     if (date.getDay() === 6) return "saturday";
     return "weekday";
@@ -301,9 +316,31 @@ function refresh() {
     document.getElementById("date-small").textContent = dateStr;
 
     // --- バス路線の描画 ---
-    renderBusList("list-oikebashi", schedule.oikebashi || [], now, opDate, 3); // 守口車庫前・なんば方面（3本）
-    renderBusList("list-kumata", schedule.kumata || [], now, opDate, 2); // 杭全・出戸バスターミナル方面（2本・新規追加）
-    renderBusList("list-abenobashi", schedule.abenobashi || [], now, opDate, 2); // あべの橋方面（2本）
+    const displayedOikebashiBuses = renderBusList(
+        "list-oikebashi",
+        schedule.oikebashi || [],
+        now,
+        opDate,
+        3,
+    ); // 守口車庫前・なんば方面（3本）
+    const displayedKumataBuses = renderBusList(
+        "list-kumata",
+        schedule.kumata || [],
+        now,
+        opDate,
+        2,
+    ); // 杭全・出戸バスターミナル方面（2本）
+    const displayedAbenobashiBuses = renderBusList(
+        "list-abenobashi",
+        schedule.abenobashi || [],
+        now,
+        opDate,
+        2,
+    ); // あべの橋方面（2本）
+
+    updateTransferGuide("transfer-guide-oikebashi", displayedOikebashiBuses, now, opDate);
+    updateTransferGuide("transfer-guide-kumata", displayedKumataBuses, now, opDate);
+    updateTransferGuide("transfer-guide-abenobashi", displayedAbenobashiBuses, now, opDate);
 }
 
 /**
@@ -351,7 +388,7 @@ function getTimetableFallbackStatus(bus, cycleSeconds) {
 
 function renderBusList(id, buses, now, opDate, maxDisplay) {
     const el = document.getElementById(id);
-    if (!el) return;
+    if (!el) return [];
     const pageEl = document.getElementById(id.replace("list-", "page-"));
 
     const allUpcoming = sortBusesByDisplayTime(buses, now, opDate).filter(
@@ -391,7 +428,7 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
                 <div class="no-bus-en">The Service of today was finished</div>
             </div>
         `;
-        return;
+        return [];
     }
 
     const engMode = Math.floor(Date.now() / 8000) % 6;
@@ -600,8 +637,135 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
             `;
         })
         .join("");
+
+    return displayBuses;
 }
 
+function getTransferGuideMessage(bus) {
+    return transferGuideMessages[`${bus.line}_${bus.dir}`] || "";
+}
+
+function createTransferGuideText(bus) {
+    const info = routeMaster[`${bus.line}_${bus.dir}`] || {};
+    const destination = normalizeDestinationName(bus.onlineDest || info.dest);
+    const message = getTransferGuideMessage(bus);
+    if (!message) return "";
+
+    return `【${bus.time}発 ${destination}行きのご案内】＜乗換＞${message}`;
+}
+
+function appendTransferGuideSpan(parent, text, className) {
+    const span = document.createElement("span");
+    span.className = className;
+    span.textContent = text;
+    parent.appendChild(span);
+}
+
+function appendTransferGuideSentence(parent, sentence) {
+    const match = sentence.match(/^(.+?)(は)(、?)(「[^」]+」)(.*)$/);
+    if (!match) {
+        appendTransferGuideSpan(parent, sentence, "transfer-guide-text");
+        return;
+    }
+
+    appendTransferGuideSpan(parent, match[1], "transfer-guide-route");
+    appendTransferGuideSpan(parent, `${match[2]}${match[3]}`, "transfer-guide-text");
+    appendTransferGuideSpan(parent, match[4], "transfer-guide-station");
+    appendTransferGuideSpan(parent, match[5], "transfer-guide-text");
+}
+
+function appendTransferGuideMessage(parent, message) {
+    const sentences = message.match(/[^。]+。?/g) || [message];
+    sentences.forEach((sentence) => appendTransferGuideSentence(parent, sentence));
+}
+
+function createTransferGuideItemElement(bus) {
+    const info = routeMaster[`${bus.line}_${bus.dir}`] || {};
+    const destination = normalizeDestinationName(bus.onlineDest || info.dest);
+    const message = getTransferGuideMessage(bus);
+    if (!message) return null;
+
+    const itemElement = document.createElement("span");
+    itemElement.className = "transfer-guide-item";
+    appendTransferGuideSpan(
+        itemElement,
+        `【${bus.time}発 ${destination}行きのご案内】＜乗換＞`,
+        "transfer-guide-text",
+    );
+    appendTransferGuideMessage(itemElement, message);
+
+    return itemElement;
+}
+
+function getTransferGuideTargetBuses(displayedBuses, now, opDate) {
+    return displayedBuses
+        .filter((bus) => {
+            const scheduledSeconds = calculateDiff(
+                bus.time,
+                now,
+                opDate,
+            ).pure_seconds;
+            const removalSeconds = calculateRemovalDiff(
+                bus,
+                now,
+                opDate,
+            ).pure_seconds;
+
+            return scheduledSeconds <= 900 && removalSeconds >= 175;
+        })
+        .sort((a, b) => {
+            return (
+                calculateDiff(a.time, now, opDate).pure_seconds -
+                calculateDiff(b.time, now, opDate).pure_seconds
+            );
+        })
+        .filter((bus) => getTransferGuideMessage(bus));
+}
+
+function updateTransferGuide(elementId, displayedBuses, now, opDate) {
+    const guideElement = document.getElementById(elementId);
+    if (!guideElement) return;
+
+    const guideBuses = getTransferGuideTargetBuses(displayedBuses, now, opDate);
+    const guideText = guideBuses.map(createTransferGuideText).join("　　　");
+
+    if (!guideText) {
+        guideElement.dataset.guideText = "";
+        guideElement.innerHTML = "";
+        return;
+    }
+
+    if (guideElement.dataset.guideText === guideText) {
+        return;
+    }
+
+    guideElement.dataset.guideText = guideText;
+    guideElement.innerHTML = "";
+
+    const trackElement = document.createElement("div");
+    trackElement.className = "transfer-guide-track";
+    guideBuses.forEach((bus, index) => {
+        if (index > 0) {
+            trackElement.appendChild(document.createTextNode("　　　"));
+        }
+
+        const itemElement = createTransferGuideItemElement(bus);
+        if (itemElement) {
+            trackElement.appendChild(itemElement);
+        }
+    });
+    guideElement.appendChild(trackElement);
+
+    requestAnimationFrame(() => {
+        const guideWidth = guideElement.clientWidth;
+        const trackWidth = trackElement.scrollWidth;
+        const durationSeconds = Math.max(35, Math.ceil((guideWidth + trackWidth) / 55));
+
+        trackElement.style.setProperty("--transfer-guide-start", `${guideWidth}px`);
+        trackElement.style.setProperty("--transfer-guide-end", `-${trackWidth}px`);
+        trackElement.style.setProperty("--transfer-guide-duration", `${durationSeconds}s`);
+    });
+}
 function getTravelStatus(diff, diff_sec_pure, suppressGiveUp) {
     if (diff_sec_pure <= 270) {
         return suppressGiveUp
@@ -614,7 +778,7 @@ function getTravelStatus(diff, diff_sec_pure, suppressGiveUp) {
     if (diff <= 8) {
         return { text: "早歩きで間に合う", color: "#ffe766" };
     }
-    return { text: "歩いても間に合う", color: "#ffe766" };
+    return { text: "歩いても間に合う", color: "#38d5ff" };
 }
 
 function visibleTime(
@@ -651,7 +815,7 @@ function visibleTime(
 
     return {
         text: `あと${displayMinutes}分${displaySeconds}秒`,
-        color: "#ffe766",
+        color: diff > 8 ? "#38d5ff" : "#ffe766",
     };
 }
 

@@ -2,7 +2,7 @@
 <html lang="ja">
     <head>
         <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
         <title>いまざとライナー時刻案内</title>
         <link rel="stylesheet" href="style/style.css" />
         <link rel="stylesheet" href="style/imazato-liner.css" />
@@ -34,6 +34,10 @@
                         class="bus-list liner-bus-list"
                         id="list-oikebashi-north"
                     ></div>
+                    <div
+                        class="transfer-guide liner-transfer-guide"
+                        id="liner-guide-oikebashi-north"
+                    ></div>
                 </section>
 
                 <section class="bus-section liner-bus-section">
@@ -51,6 +55,10 @@
                     <div
                         class="bus-list liner-bus-list"
                         id="list-oikebashi-south"
+                    ></div>
+                    <div
+                        class="transfer-guide liner-transfer-guide"
+                        id="liner-guide-oikebashi-south"
                     ></div>
                 </section>
             </section>
@@ -80,6 +88,10 @@
                         class="bus-list liner-bus-list"
                         id="list-tajima-north"
                     ></div>
+                    <div
+                        class="transfer-guide liner-transfer-guide"
+                        id="liner-guide-tajima-north"
+                    ></div>
                 </section>
 
                 <section class="bus-section liner-bus-section">
@@ -98,10 +110,23 @@
                         class="bus-list liner-bus-list"
                         id="list-tajima-south"
                     ></div>
+                    <div
+                        class="transfer-guide liner-transfer-guide"
+                        id="liner-guide-tajima-south"
+                    ></div>
                 </section>
             </section>
-        </main>
 
+            <aside class="time-signal-control-panel" aria-label="時報操作">
+                <div class="time-signal-control-inner">
+                    <button id="time-signal-toggle" class="time-signal-toggle" type="button">時報停止</button>
+                    <div id="time-signal-status" class="time-signal-status">時報制御を確認中</div>
+                    <div id="time-signal-menu" class="time-signal-menu" hidden></div>
+                </div>
+            </aside>        </main>
+
+        <script src="app/pointer-visibility.js"></script>
         <script src="app/imazato-liner.js"></script>
+        <script src="app/time-signal-control.js"></script>
     </body>
 </html>

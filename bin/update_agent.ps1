@@ -91,7 +91,7 @@ function Read-Config {
             ConvertFrom-Json
     }
     catch {
-        Write-UpdateLog "update_config.json の読み込みに失敗しました: $($_.Exception.Message)"
+        Write-UpdateLog "update_config.json 縺ｮ隱ｭ縺ｿ霎ｼ縺ｿ縺ｫ螟ｱ謨励＠縺ｾ縺励◆: $($_.Exception.Message)"
         return @{}
     }
 }
@@ -174,6 +174,40 @@ function Test-UpdateRequestSignature {
     }
 }
 
+
+function Add-TaskbarApiType {
+    if ("InfomationSystemUpdateTaskbar" -as [type]) { return }
+
+    Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class InfomationSystemUpdateTaskbar {
+    [DllImport("user32.dll")]
+    public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+    [DllImport("user32.dll")]
+    public static extern IntPtr FindWindowEx(IntPtr parentHandle, IntPtr childAfter, string className, string windowTitle);
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+}
+"@
+}
+
+function Hide-WindowsTaskbar {
+    Add-TaskbarApiType
+    $hide = 0
+    $primary = [InfomationSystemUpdateTaskbar]::FindWindow("Shell_TrayWnd", $null)
+    if ($primary -ne [IntPtr]::Zero) {
+        [void][InfomationSystemUpdateTaskbar]::ShowWindow($primary, $hide)
+    }
+
+    $secondary = [IntPtr]::Zero
+    do {
+        $secondary = [InfomationSystemUpdateTaskbar]::FindWindowEx([IntPtr]::Zero, $secondary, "Shell_SecondaryTrayWnd", $null)
+        if ($secondary -ne [IntPtr]::Zero) {
+            [void][InfomationSystemUpdateTaskbar]::ShowWindow($secondary, $hide)
+        }
+    } while ($secondary -ne [IntPtr]::Zero)
+}
 function Get-EdgePath {
     $candidates = @(
         (Get-Command "msedge.exe" -ErrorAction SilentlyContinue).Source,
@@ -221,29 +255,55 @@ function Stop-SignageProcesses {
 }
 
 function Start-UpdateScreen {
+    Hide-WindowsTaskbar
     $edgePath = Get-EdgePath
     if (-not $edgePath) { return }
 
     $pagePath = Join-Path -Path $projectDir -ChildPath "update.html"
     if (-not (Test-Path -LiteralPath $pagePath -PathType Leaf)) { return }
 
-    $profilePath = Join-Path -Path $env:TEMP -ChildPath "snow-link-drone-edge-update"
-    Ensure-Directory $profilePath
+    try {
+        Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+        $screens = @([System.Windows.Forms.Screen]::AllScreens)
+    }
+    catch {
+        $screens = @()
+    }
+
+    if ($screens.Count -eq 0) {
+        $screens = @($null)
+    }
+
     $pageUrl = ([Uri](Resolve-Path -LiteralPath $pagePath).Path).AbsoluteUri
-    $argumentLine = @(
-        "--kiosk `"$pageUrl`"",
-        "--edge-kiosk-type=fullscreen",
-        "--no-first-run",
-        "--disable-infobars",
-        "--noerrdialogs",
-        "--disable-session-crashed-bubble",
-        "--allow-file-access-from-files",
-        "--user-data-dir=`"$profilePath`""
-    ) -join " "
+    for ($i = 0; $i -lt $screens.Count; $i++) {
+        $profilePath = Join-Path `
+            -Path $env:TEMP `
+            -ChildPath "snow-link-drone-edge-update-$i"
+        Ensure-Directory $profilePath
 
-    Start-Process -FilePath $edgePath -ArgumentList $argumentLine -WindowStyle Normal
+        $arguments = @(
+            "--kiosk `"$pageUrl`"",
+            "--edge-kiosk-type=fullscreen",
+            "--no-first-run",
+            "--disable-infobars",
+            "--noerrdialogs",
+            "--disable-session-crashed-bubble",
+            "--allow-file-access-from-files",
+            "--user-data-dir=`"$profilePath`""
+        )
+
+        if ($screens[$i]) {
+            $bounds = $screens[$i].Bounds
+            $arguments += "--window-position=$($bounds.X),$($bounds.Y)"
+            $arguments += "--window-size=$($bounds.Width),$($bounds.Height)"
+        }
+
+        Start-Process `
+            -FilePath $edgePath `
+            -ArgumentList ($arguments -join " ") `
+            -WindowStyle Normal
+    }
 }
-
 function Backup-CurrentSystem {
     $backupDir = Join-Path -Path $backupRoot -ChildPath (Get-Date -Format "yyyyMMdd_HHmmss")
     Ensure-Directory $backupDir
@@ -384,7 +444,7 @@ try {
     Resolve-Setting
     Ensure-Directory $WatchPath
     Ensure-Directory $updateRoot
-    Write-UpdateLog "更新待機を開始しました: $WatchPath"
+    Write-UpdateLog "譖ｴ譁ｰ蠕・ｩ溘ｒ髢句ｧ九＠縺ｾ縺励◆: $WatchPath"
     if ([string]::IsNullOrWhiteSpace($authToken)) {
         Write-UpdateLog "authToken が未設定のため、更新適用は無効です。"
     }
@@ -399,7 +459,7 @@ try {
             }
             catch {
                 Write-UpdateStatus -Message "アップデート失敗" -Detail $_.Exception.Message
-                Write-UpdateLog "更新失敗: $($_.Exception.Message)"
+                Write-UpdateLog "譖ｴ譁ｰ螟ｱ謨・ $($_.Exception.Message)"
                 Complete-RequestFile -ReadyPath $requestFile.FullName -Status "failed"
             }
         }

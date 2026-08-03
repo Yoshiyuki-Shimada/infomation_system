@@ -328,10 +328,17 @@ html {
     color: var(--snow-gray-text);
 }
 .no-bus {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
     font-size: 1.5rem;
     color: var(--snow-gray-text);
     padding: 30px;
     font-weight: bold;
+    box-sizing: border-box;
 }
 .no-liner {
     padding-left: 0px;
@@ -684,5 +691,65 @@ html {
 }
 
 #list-abenobashi {
-    height: 110px; /* 120px × 1本分 */
+    height: 220px; /* 110px × 2本分 */
+}
+
+.transfer-guide {
+    flex: 0 0 32px;
+    min-height: 32px;
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+    box-sizing: border-box;
+    border-top: 2px solid #333;
+    background: #050505;
+    color: var(--snow-white);
+    font-size: 1.22rem;
+    font-weight: bold;
+    white-space: nowrap;
+}
+
+.transfer-guide-track {
+    display: inline-flex;
+    align-items: center;
+    flex: 0 0 auto;
+    will-change: transform;
+    animation: transfer-guide-scroll var(--transfer-guide-duration, 42s) linear infinite;
+}
+
+.transfer-guide-item,
+.transfer-guide-text {
+    color: var(--snow-white);
+}
+
+.transfer-guide-route {
+    color: var(--sky-blue);
+}
+
+.transfer-guide-station {
+    color: var(--sky-yellow);
+}
+
+@keyframes transfer-guide-scroll {
+    from {
+        transform: translateX(var(--transfer-guide-start, 100%));
+    }
+    to {
+        transform: translateX(var(--transfer-guide-end, -100%));
+    }
+}
+
+html,
+html * {
+    cursor: none !important;
+}
+
+html.signage-pointer-visible,
+html.signage-pointer-visible * {
+    cursor: auto !important;
+}
+html,
+body {
+    touch-action: manipulation;
+    overscroll-behavior: none;
 }

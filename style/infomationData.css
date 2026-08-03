@@ -135,7 +135,10 @@
 
 /** 現在の天気の名称 */
 .weather_name_now {
+    display: block;
+    margin-top: 10px;
     font-size: 1.8rem;
+    line-height: 1.15;
 }
 
 .weather_precipitation_now {
@@ -266,6 +269,7 @@
 
 #slide-container.with-earthquake-bottom-banner .weather_name_now,
 .slide-area.with-earthquake-bottom-banner .weather_name_now {
+    margin-top: 8px;
     font-size: 1.55rem;
 }
 
