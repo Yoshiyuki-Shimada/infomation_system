@@ -1,6 +1,34 @@
-﻿$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Stop"
 
 Add-Type -AssemblyName System.Windows.Forms
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class InfomationSystemTaskbar {
+    [DllImport("user32.dll")]
+    public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+    [DllImport("user32.dll")]
+    public static extern IntPtr FindWindowEx(IntPtr parentHandle, IntPtr childAfter, string className, string windowTitle);
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+}
+"@
+
+function Hide-WindowsTaskbar {
+    $hide = 0
+    $primary = [InfomationSystemTaskbar]::FindWindow("Shell_TrayWnd", $null)
+    if ($primary -ne [IntPtr]::Zero) {
+        [void][InfomationSystemTaskbar]::ShowWindow($primary, $hide)
+    }
+
+    $secondary = [IntPtr]::Zero
+    do {
+        $secondary = [InfomationSystemTaskbar]::FindWindowEx([IntPtr]::Zero, $secondary, "Shell_SecondaryTrayWnd", $null)
+        if ($secondary -ne [IntPtr]::Zero) {
+            [void][InfomationSystemTaskbar]::ShowWindow($secondary, $hide)
+        }
+    } while ($secondary -ne [IntPtr]::Zero)
+}
 
 $projectDir = Split-Path -Path $PSScriptRoot -Parent
 $edgeCandidates = @(
@@ -21,6 +49,7 @@ $profileRoot = Join-Path -Path $env:TEMP -ChildPath "snow-link-drone-edge"
 $indexProfile = Join-Path -Path $profileRoot -ChildPath "index"
 $linerProfile = Join-Path -Path $profileRoot -ChildPath "imazato-liner"
 
+# サイネージ用に起動したEdgeだけ閉じる。普段使いのEdgeは触らない。
 # サイネージ用に起動したEdgeだけ閉じる。普段使いのEdgeは触らない。
 Get-CimInstance Win32_Process |
     Where-Object {
@@ -62,6 +91,7 @@ function Start-KioskWindow {
     $bounds = $Screen.Bounds
 
     # Edge kiosk は「--kiosk URL」の形で渡す。--kiosk="URL" だと環境によりURLを拾えずInPrivate開始画面になることがある。
+    # Edge kiosk は「--kiosk URL」の形で渡す。
     $argumentLine = @(
         "--kiosk `"$pageUrl`"",
         "--edge-kiosk-type=fullscreen",
@@ -81,6 +111,8 @@ function Start-KioskWindow {
         -ArgumentList $argumentLine `
         -WindowStyle Normal
 }
+
+Hide-WindowsTaskbar
 
 # テレビ/外部画面: メイン画面 index.html
 Start-KioskWindow `

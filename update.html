@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
     <title>システムアップデート中</title>
     <style>
         html,
@@ -84,6 +84,18 @@
             animation: loading 1.45s linear infinite;
         }
 
+
+        html,
+        html * {
+            cursor: none !important;
+            touch-action: manipulation;
+            overscroll-behavior: none;
+        }
+
+        html.signage-pointer-visible,
+        html.signage-pointer-visible * {
+            cursor: auto !important;
+        }
         @keyframes loading {
             from { transform: translateX(-100%); }
             to { transform: translateX(300%); }
@@ -122,5 +134,6 @@
         loadStatus();
         setInterval(loadStatus, 1000);
     </script>
+    <script src="app/pointer-visibility.js"></script>
 </body>
 </html>

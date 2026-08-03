@@ -1,4 +1,4 @@
-param(
+﻿param(
     [switch]$RunOnce
 )
 
@@ -8,6 +8,10 @@ $parentDir = Split-Path -Path $PSScriptRoot -Parent
 $tempDir = Join-Path -Path $parentDir -ChildPath "temp"
 $filePath = Join-Path -Path $tempDir -ChildPath "imazato_liner_online.js"
 $temporaryPath = "$filePath.tmp"
+$timetableBaseUrl = "https://oc.bus-vision.jp/osakacitybus/view/"
+$userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
+$timetableCache = $null
+$timetableCacheFetchedAt = $null
 
 $urls = @{
     oikebashiNorth = "https://oc.bus-vision.jp/osakacitybus/view/approachSpecifiedStop.html?stopCdSpecified=632&poleCdSpecified=90&lang=0"
@@ -15,7 +19,14 @@ $urls = @{
     tajimaNorth = "https://oc.bus-vision.jp/osakacitybus/view/approachSpecifiedStop.html?stopCdSpecified=677&poleCdSpecified=90&lang=0"
     tajimaSouth = "https://oc.bus-vision.jp/osakacitybus/view/approachSpecifiedStop.html?stopCdSpecified=677&poleCdSpecified=80&lang=0"
 }
-$userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
+
+$timetableTargets = @{
+    oikebashiNorth = @{ stopCd = "632"; poleCd = "90" }
+    oikebashiSouth = @{ stopCd = "632"; poleCd = "30" }
+    tajimaNorth = @{ stopCd = "677"; poleCd = "90" }
+    tajimaSouth = @{ stopCd = "677"; poleCd = "80" }
+}
+
 $delayPattern =
     ([string][char]0x7D04) + '?\s*(\d+)\s*' +
     ([string][char]0x5206) +
@@ -27,6 +38,120 @@ $delayPattern =
 function Ensure-TempDirectory {
     if (-not (Test-Path -LiteralPath $tempDir -PathType Container)) {
         New-Item -Path $tempDir -ItemType Directory -Force | Out-Null
+    }
+}
+
+function Get-TimetableUrl {
+    param(
+        [string]$StopCode,
+        [string]$PoleCode,
+        [string]$OperationDate
+    )
+
+    return "${timetableBaseUrl}diagram.html?stopCd=$StopCode&poleCd=$PoleCode&opeYmd=$OperationDate&timetableDateDivCd=-1&lang=0"
+}
+
+function Get-RouteKeyFromUrl {
+    param([string]$Url)
+
+    $lineMatch = [regex]::Match($Url, '(?:\?|&amp;|&)lineCd=([^&]+)')
+    $routeMatch = [regex]::Match($Url, '(?:\?|&amp;|&)routeCd=([^&]+)')
+    $updownMatch = [regex]::Match($Url, '(?:\?|&amp;|&)updownCd=([^&]+)')
+    if (-not $lineMatch.Success -or -not $routeMatch.Success -or -not $updownMatch.Success) {
+        return $null
+    }
+
+    return "$($lineMatch.Groups[1].Value)_$($routeMatch.Groups[1].Value)_$($updownMatch.Groups[1].Value)"
+}
+
+function Get-TimetableDetailLinks {
+    param([string[]]$HtmlList)
+
+    $links = @{}
+    foreach ($html in $HtmlList) {
+        $matches = [regex]::Matches(
+            $html,
+            '(?is)<a\b(?=[^>]*\bid\s*=\s*["'']value["''])[^>]*\bhref\s*=\s*["'']([^"'']+)["''][^>]*>'
+        )
+
+        foreach ($match in $matches) {
+            $href = [Net.WebUtility]::HtmlDecode($match.Groups[1].Value)
+            $key = Get-RouteKeyFromUrl $href
+            if ($key -and -not $links.ContainsKey($key)) {
+                $links[$key] = $href
+            }
+        }
+    }
+
+    return $links
+}
+
+function Get-HtmlElementTextById {
+    param(
+        [string]$Html,
+        [string]$Id
+    )
+
+    $pattern = '(?is)<[^>]*\bid\s*=\s*["'']' +
+        [regex]::Escape($Id) +
+        '["''][^>]*>(.*?)</[^>]+>'
+    $match = [regex]::Match($Html, $pattern)
+    if (-not $match.Success) { return "" }
+
+    $text = [regex]::Replace($match.Groups[1].Value, '<[^>]+>', ' ')
+    return [Net.WebUtility]::HtmlDecode($text).Trim()
+}
+
+function Get-OfficialTimetableData {
+    param([string]$OperationDate)
+
+    $htmlData = @{}
+    foreach ($entry in $timetableTargets.GetEnumerator()) {
+        $url = Get-TimetableUrl `
+            -StopCode $entry.Value.stopCd `
+            -PoleCode $entry.Value.poleCd `
+            -OperationDate $OperationDate
+        $htmlData[$entry.Key] = (
+            Invoke-WebRequest `
+                -Uri $url `
+                -UserAgent $userAgent `
+                -UseBasicParsing `
+                -TimeoutSec 20
+        ).Content
+
+        if ([string]::IsNullOrWhiteSpace($htmlData[$entry.Key])) {
+            throw "公式時刻表のHTMLが空です: $($entry.Key)"
+        }
+    }
+
+    $routeDetails = @{}
+    $detailLinks = Get-TimetableDetailLinks -HtmlList @($htmlData.Values)
+    foreach ($entry in $detailLinks.GetEnumerator()) {
+        $detailUri = [Uri]::new([Uri]$timetableBaseUrl, $entry.Value).AbsoluteUri
+        $detailHtml = (
+            Invoke-WebRequest `
+                -Uri $detailUri `
+                -UserAgent $userAgent `
+                -UseBasicParsing `
+                -TimeoutSec 15
+        ).Content
+        $routeName = Get-HtmlElementTextById -Html $detailHtml -Id "routeNm"
+        $destinationName = Get-HtmlElementTextById -Html $detailHtml -Id "destNm"
+        if ($routeName -and $destinationName) {
+            $routeDetails[$entry.Key] = @{
+                routeName = $routeName
+                destinationName = $destinationName
+            }
+        }
+    }
+
+    return @{
+        operationDate = $OperationDate
+        oikebashiNorthHtml = $htmlData.oikebashiNorth
+        oikebashiSouthHtml = $htmlData.oikebashiSouth
+        tajimaNorthHtml = $htmlData.tajimaNorth
+        tajimaSouthHtml = $htmlData.tajimaSouth
+        routeDetails = $routeDetails
     }
 }
 
@@ -54,17 +179,12 @@ function Test-HasDelayAtLeastTwoMinutes {
                 ''
             )
             $routeText = [Net.WebUtility]::HtmlDecode($routeText)
-            $routeText = ($routeText -replace '\s', '') -replace '号$', ''
+            $routeText = ($routeText -replace '\s', '') -replace '号$', '' -replace '蜿ｷ$', ''
             if ($routeText -ne "BRT1" -and $routeText -ne "BRT2") {
                 continue
             }
 
-            foreach (
-                $match in [regex]::Matches(
-                    $approachBlock.Value,
-                    $delayPattern
-                )
-            ) {
+            foreach ($match in [regex]::Matches($approachBlock.Value, $delayPattern)) {
                 if ([int]$match.Groups[1].Value -ge 2) {
                     return $true
                 }
@@ -140,6 +260,32 @@ while ($true) {
             }
         }
 
+        $operationDate = Get-Date -Format "yyyyMMdd"
+        $timetableCacheExpired = -not $timetableCacheFetchedAt -or
+            ((Get-Date) - $timetableCacheFetchedAt).TotalMinutes -ge 30
+        if (-not $timetableCache -or
+            $timetableCache["operationDate"] -ne $operationDate -or
+            $timetableCacheExpired) {
+            try {
+                $timetableCache = Get-OfficialTimetableData -OperationDate $operationDate
+                $timetableCacheFetchedAt = Get-Date
+                Write-Host "$(Get-Date -Format 'HH:mm:ss') Imazato Liner official timetable updated ($operationDate)"
+            }
+            catch {
+                if (-not $timetableCache -or $timetableCache["operationDate"] -ne $operationDate) {
+                    $timetableCache = @{
+                        operationDate = $operationDate
+                        oikebashiNorthHtml = ""
+                        oikebashiSouthHtml = ""
+                        tajimaNorthHtml = ""
+                        tajimaSouthHtml = ""
+                        routeDetails = @{}
+                    }
+                }
+                Write-Host "$(Get-Date -Format 'HH:mm:ss') Imazato Liner official timetable failed: $($_.Exception.Message)" -ForegroundColor Yellow
+            }
+        }
+
         if (Test-HasDelayAtLeastTwoMinutes -HtmlList @($htmlData.Values)) {
             $normalFetchSeconds = 15
         }
@@ -156,8 +302,14 @@ while ($true) {
             oikebashiSouthHtml = $htmlData.oikebashiSouth
             tajimaNorthHtml = $htmlData.tajimaNorth
             tajimaSouthHtml = $htmlData.tajimaSouth
+            timetableDate = $timetableCache["operationDate"]
+            timetableOikebashiNorthHtml = $timetableCache["oikebashiNorthHtml"]
+            timetableOikebashiSouthHtml = $timetableCache["oikebashiSouthHtml"]
+            timetableTajimaNorthHtml = $timetableCache["tajimaNorthHtml"]
+            timetableTajimaSouthHtml = $timetableCache["tajimaSouthHtml"]
+            timetableRouteDetails = $timetableCache["routeDetails"]
         }
-        $json = $payload | ConvertTo-Json -Compress
+        $json = $payload | ConvertTo-Json -Compress -Depth 8
         $javascript = "registerImazatoLinerHtml($json);"
 
         Ensure-TempDirectory

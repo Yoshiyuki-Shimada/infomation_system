@@ -21,7 +21,7 @@ $privateLineIds = @(
     "362", #阪堺線
     "380", #大阪モノレール
     "354", #山陽電車線
-    "7", "8" #東海道・山陽新幹線
+    "7" #東海道新幹線（山陽新幹線はJR西日本公式APIから取得）
 )
 
 function Get-YahooRailwayColor {
@@ -153,9 +153,11 @@ while ($true) {
                         Select-Object -First 1
                     $weeklyDays = @()
                     $weeklyTimes = @($weeklyWeatherSeries.timeDefines)
+                    $todayDate = (Get-Date).Date
 
                     for ($dayIndex = 0; $dayIndex -lt $weeklyTimes.Count; $dayIndex++) {
                         $targetDate = [datetimeoffset]::Parse($weeklyTimes[$dayIndex]).Date
+                        if ($targetDate -le $todayDate) { continue }
                         $pop = [string]$weeklyWeatherArea.pops[$dayIndex]
                         $tempMin = [string]$weeklyTemperatureArea.tempsMin[$dayIndex]
                         $tempMax = [string]$weeklyTemperatureArea.tempsMax[$dayIndex]
@@ -303,80 +305,213 @@ while ($true) {
     Write-Host " [RAILWAY] 鉄道処理を開始します..." -ForegroundColor DarkCyan
     try {
         # JR西日本 取得関数
-        function Get-JRWestTrafficInfoData {
-            $jrApiUrl = "https://trafficinfo.westjr.co.jp/api/v1/trafficinfo.json"
-            $jrRaw = Invoke-RestMethod -Uri $jrApiUrl -Method Get
-            $results = @()
+        function Get-JRWestLineName {
+            param($Line)
 
-            # 近畿エリア(ID:2)を抽出
-            $area = $jrRaw.areaTrafficInfos | Where-Object { $_.id -eq 2 }
-            if (-not $area -or -not $area.dailyData) { return $results }
+            if ($Line.name) { return [string]$Line.name }
+            if ($Line.lineName) { return [string]$Line.lineName }
+            if ($Line.trainName) { return [string]$Line.trainName }
+            return ""
+        }
 
-            # 深夜帯は日付が混在するため、配信されている全日程(dailyData)をループする
-            foreach ($daily in $area.dailyData) {
-                foreach ($place in $daily.placeTrafficInfos) {
-                    foreach ($line in $place.conventionalLineTrafficInfos) {
-                        
-                        $lineName = if ($line.name) { $line.name } else { $line.lineName }
-                        if (-not $line.conventionalLineTrafficInfoDetails) { continue }
+        function Get-JRWestLatestVersionDetail {
+            param($Detail)
 
-                        foreach ($detail in $line.conventionalLineTrafficInfoDetails) {
-                            $secList = @()
-                            $maxSev = 0
+            if (-not $Detail.versionDetail) { return $null }
+            return $Detail.versionDetail | Sort-Object id -Descending | Select-Object -First 1
+        }
 
-                            # 区間情報の解析
-                            if ($detail.sections) {
-                                foreach ($sec in $detail.sections) {
-                                    if ($sec.conditionName -eq "平常") { continue }
-                                    
-                                    if ($sec.endStation -eq "" -or $sec.endStation -eq $null) {
-                                        $secList += "$($sec.startStation)（$($sec.conditionName)）"
-                                    }
-                                    else {
-                                        $secList += "$($sec.startStation)　～　$($sec.endStation)（$($sec.conditionName)）"
-                                    }
-                                    
-                                    if ($sec.conditionName -match "見合わせ|取り止め|運休") { $maxSev = 3 }
-                                    if ($sec.conditionName -match "お知らせ|可能性") { $maxSev = 2 }
-                                }
-                            }
+        function Get-JRWestTrafficColor {
+            param(
+                $Detail,
+                [int]$SectionSeverity
+            )
 
-                            # 詳細テキストがある場合は採用（区間が空でもメッセージがあれば出す）
-                            if ($secList.Count -eq 0 -and $detail.versionDetail) {
-                                $secList += "運行情報あり"
-                            }
+            $text = @(
+                [string]$Detail.conditionName,
+                [string]$Detail.cause,
+                [string]$Detail.supplementary
+            ) -join " "
 
-                            if ($secList.Count -eq 0) { continue }
+            if ($text -match "見合わせ|取り止め|運休|運転休止") { return "red" }
+            if ($SectionSeverity -ge 3) { return "red" }
+            if ($text -match "お知らせ|可能性|行き先変更|変更") { return "orange" }
+            if ($SectionSeverity -ge 2) { return "orange" }
+            return "yellow"
+        }
 
-                            # 詳細メッセージ取得
-                            $title = ""; $body = ""
-                            if ($detail.versionDetail) {
-                                $latestDetail = $detail.versionDetail | Sort-Object id -Descending | Select-Object -First 1
-                                $title = $latestDetail.title; $body = $latestDetail.body
-                            }
+        function Get-JRWestDetailSearchText {
+            param($Line, $Detail)
 
-                            $msg = ($secList -join " / ")
-                            if ($detail.cause) { $msg += " 【原因】$($detail.cause)" }
-                            if ($detail.resume) { $msg += " 【再開見込】$($detail.resume)" }
+            $lineName = Get-JRWestLineName -Line $Line
+            $json = ""
+            try {
+                $json = $Detail | ConvertTo-Json -Depth 12 -Compress
+            }
+            catch {
+                $json = ""
+            }
+            return "$lineName $json"
+        }
 
-                            $color = switch ($maxSev) { 3 { "red" }; 2 { "orange" }; default { "yellow" } }
+        function Get-JRWestMatchedLimitedExpressNames {
+            param($Line, $Detail)
 
-                            $results += @{
-                                company = "JR西日本"; name = $lineName; msg = $msg;
-                                color = $color; title = $title; body = $body; lineCode = 0;
-                            }
-                            Write-Host "  -> [JR] $lineName ($color) を採用" -ForegroundColor Green
-                            
-                            
+            $targets = @("こうのとり", "はまかぜ", "きのさき", "はしだて", "まいづる")
+            $searchText = Get-JRWestDetailSearchText -Line $Line -Detail $Detail
+            return @($targets | Where-Object { $searchText -match [regex]::Escape($_) })
+        }
+
+        function Add-JRWestTrafficInfoEntry {
+            param(
+                [System.Collections.IList]$Results,
+                [hashtable]$SeenKeys,
+                $Line,
+                $Detail,
+                [string]$DisplayName
+            )
+
+            if ([string]::IsNullOrWhiteSpace($DisplayName)) { return }
+
+            $secList = @()
+            $maxSev = 0
+
+            if ($Detail.sections) {
+                foreach ($sec in $Detail.sections) {
+                    if ($sec.conditionName -eq "平常") { continue }
+
+                    $sectionCondition = [string]$sec.conditionName
+                    $sectionDirection = [string]$sec.upAndDown
+                    $sectionPrefix = if ([string]::IsNullOrWhiteSpace($sectionDirection)) { "" } else { "[$sectionDirection] " }
+
+                    if ($sec.endStation -eq "" -or $null -eq $sec.endStation) {
+                        $secList += "$sectionPrefix$($sec.startStation)（$sectionCondition）"
+                    }
+                    else {
+                        $secList += "$sectionPrefix$($sec.startStation)　～　$($sec.endStation)（$sectionCondition）"
+                    }
+
+                    if ($sectionCondition -match "見合わせ|取り止め|運休|運転休止") { $maxSev = 3 }
+                    elseif ($sectionCondition -match "お知らせ|可能性|行き先変更|変更") { $maxSev = [Math]::Max($maxSev, 2) }
+                }
+            }
+
+            if ($secList.Count -eq 0 -and $Detail.versionDetail) {
+                $secList += "運行情報あり"
+            }
+
+            if ($secList.Count -eq 0) { return }
+
+            $latestDetail = Get-JRWestLatestVersionDetail -Detail $Detail
+            $title = if ($latestDetail) { [string]$latestDetail.title } else { "" }
+            $body = if ($latestDetail) { [string]$latestDetail.body } else { "" }
+
+            $msg = ($secList -join " / ")
+            if ($Detail.cause) { $msg += " 【原因】$($Detail.cause)" }
+            if ($Detail.resume) { $msg += " 【再開見込】$($Detail.resume)" }
+
+            $seenKey = "$DisplayName|$title|$msg|$body"
+            if ($SeenKeys.ContainsKey($seenKey)) { return }
+            $SeenKeys[$seenKey] = $true
+
+            $color = Get-JRWestTrafficColor -Detail $Detail -SectionSeverity $maxSev
+
+            [void]$Results.Add(@{
+                company = "JR西日本";
+                name = $DisplayName;
+                msg = $msg;
+                color = $color;
+                title = $title;
+                body = $body;
+                lineCode = 0;
+            })
+            Write-Host "  -> [JR] $DisplayName ($color) を採用" -ForegroundColor Green
+        }
+
+        function Add-JRWestLineTrafficInfos {
+            param(
+                [System.Collections.IList]$Results,
+                [hashtable]$SeenKeys,
+                $Lines,
+                [string]$DetailPropertyName,
+                [string[]]$AllowedLineNames = @(),
+                [switch]$LimitedExpressMode
+            )
+
+            foreach ($line in @($Lines)) {
+                if (-not $line) { continue }
+                $lineName = Get-JRWestLineName -Line $line
+                if ($AllowedLineNames.Count -gt 0 -and $AllowedLineNames -notcontains $lineName) { continue }
+
+                $details = $line.$DetailPropertyName
+                if (-not $details) { continue }
+
+                foreach ($detail in @($details)) {
+                    if ($LimitedExpressMode) {
+                        $matchedNames = Get-JRWestMatchedLimitedExpressNames -Line $line -Detail $detail
+                        foreach ($matchedName in $matchedNames) {
+                            Add-JRWestTrafficInfoEntry `
+                                -Results $Results `
+                                -SeenKeys $SeenKeys `
+                                -Line $line `
+                                -Detail $detail `
+                                -DisplayName "特急$matchedName"
                         }
-
+                    }
+                    else {
+                        Add-JRWestTrafficInfoEntry `
+                            -Results $Results `
+                            -SeenKeys $SeenKeys `
+                            -Line $line `
+                            -Detail $detail `
+                            -DisplayName $lineName
                     }
                 }
             }
-            
-            return $results
         }
 
+        # JR西日本 取得関数
+        function Get-JRWestTrafficInfoData {
+            $jrApiUrl = "https://trafficinfo.westjr.co.jp/api/v1/trafficinfo.json"
+            $jrRaw = Invoke-RestMethod -Uri $jrApiUrl -Method Get -TimeoutSec 15
+            $results = New-Object System.Collections.ArrayList
+            $seenKeys = @{}
+
+            foreach ($area in $jrRaw.areaTrafficInfos) {
+                if (-not $area.dailyData) { continue }
+
+                foreach ($daily in $area.dailyData) {
+                    foreach ($place in $daily.placeTrafficInfos) {
+                        # 近畿エリア(ID:2)の在来線
+                        if ($area.id -eq 2) {
+                            Add-JRWestLineTrafficInfos `
+                                -Results $results `
+                                -SeenKeys $seenKeys `
+                                -Lines $place.conventionalLineTrafficInfos `
+                                -DetailPropertyName "conventionalLineTrafficInfoDetails"
+                        }
+
+                        # 山陽新幹線はYahoo!ではなくJR西日本公式APIから取得する。
+                        Add-JRWestLineTrafficInfos `
+                            -Results $results `
+                            -SeenKeys $seenKeys `
+                            -Lines $place.shinkansenTrafficInfos `
+                            -DetailPropertyName "shinkansenTrafficInfoDetails" `
+                            -AllowedLineNames @("山陽新幹線")
+
+                        # 指定された特急列車だけを公式APIから取得する。
+                        Add-JRWestLineTrafficInfos `
+                            -Results $results `
+                            -SeenKeys $seenKeys `
+                            -Lines $place.expressTrafficInfos `
+                            -DetailPropertyName "expressTrafficInfoDetails" `
+                            -LimitedExpressMode
+                    }
+                }
+            }
+
+            return @($results)
+        }
         # JR実行
         $jrResults = Get-JRWestTrafficInfoData
         if ($jrResults) {

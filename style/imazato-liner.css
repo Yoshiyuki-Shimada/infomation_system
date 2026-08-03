@@ -55,6 +55,11 @@
     font-size: 0.72rem;
 }
 
+.liner-transfer-guide {
+    flex: 0 0 32px;
+    min-height: 32px;
+    font-size: 1.05rem;
+}
 .liner-bus-list {
     flex: 1;
     justify-content: flex-start;
@@ -157,5 +162,168 @@
 
     .liner-destination {
         font-size: 1.9rem;
+    }
+}
+
+.imazato-screen .container {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 180px;
+}
+
+.imazato-screen .liner-display-panel {
+    width: 100%;
+    min-width: 0;
+}
+
+.time-signal-control-panel {
+    height: 100vh;
+    box-sizing: border-box;
+    border-left: 2px solid var(--snow-white);
+    background: #050505;
+    display: flex;
+    flex-direction: column;
+}
+
+.time-signal-control-inner {
+    position: relative;
+    box-sizing: border-box;
+    padding: 12px 10px;
+    min-height: 70px;
+    background: var(--moon-navy);
+    border-bottom: 2px solid var(--snow-white);
+}
+
+.time-signal-toggle {
+    width: 100%;
+    min-height: 48px;
+    border: 2px solid var(--sky-yellow);
+    background: var(--sky-yellow);
+    color: #000;
+    font-size: 1.08rem;
+    font-weight: 900;
+    cursor: pointer;
+    touch-action: manipulation;
+}
+
+.time-signal-toggle:disabled {
+    border-color: #555;
+    background: #333;
+    color: #888;
+    cursor: not-allowed;
+}
+
+.time-signal-paused .time-signal-toggle:not(:disabled) {
+    border-color: var(--alert-red-bg);
+    background: var(--alert-red-bg);
+    color: #fff;
+}
+
+.time-signal-status {
+    margin-top: 8px;
+    color: var(--snow-white);
+    font-size: 0.78rem;
+    line-height: 1.35;
+}
+
+.time-signal-menu[hidden] {
+    display: none !important;
+}
+
+.time-signal-menu {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 34px;
+    background: rgba(0, 0, 0, 0.72);
+    touch-action: manipulation;
+}
+
+.time-signal-menu-dialog {
+    box-sizing: border-box;
+    width: min(700px, calc(100vw - 72px));
+    max-height: calc(100vh - 68px);
+    overflow: hidden;
+    padding: 18px;
+    background: #0b0d12;
+    border: 3px solid var(--sky-blue);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.68);
+}
+
+.time-signal-menu-title {
+    margin-bottom: 14px;
+    color: var(--sky-yellow);
+    font-size: 1.35rem;
+    font-weight: 900;
+    text-align: center;
+}
+
+.time-signal-option-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    max-height: calc(100vh - 170px);
+    overflow: hidden auto;
+}
+
+.time-signal-option {
+    width: 100%;
+    min-height: 72px;
+    border: 2px solid #2a3345;
+    background: #111722;
+    color: var(--snow-white);
+    font-size: 1.35rem;
+    font-weight: 900;
+    text-align: center;
+    padding: 14px 10px;
+    cursor: pointer;
+    touch-action: manipulation;
+}
+
+.time-signal-option:active,
+.time-signal-option:hover,
+.time-signal-option:focus-visible {
+    background: #173150;
+    border-color: var(--sky-blue);
+}
+
+@media (max-width: 1400px) {
+    .imazato-screen .container {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 150px;
+    }
+
+    .time-signal-toggle {
+        font-size: 1.02rem;
+    }
+
+    .time-signal-status {
+        font-size: 0.68rem;
+    }
+
+    .time-signal-menu {
+        padding: 24px;
+    }
+
+    .time-signal-menu-dialog {
+        width: min(620px, calc(100vw - 48px));
+        padding: 16px;
+    }
+
+    .time-signal-menu-title {
+        font-size: 1.18rem;
+    }
+
+    .time-signal-option-list {
+        gap: 10px;
+        max-height: calc(100vh - 150px);
+    }
+
+    .time-signal-option {
+        min-height: 66px;
+        font-size: 1.2rem;
+        padding: 12px 8px;
     }
 }
