@@ -34,6 +34,24 @@ function normalizeOnlineTime(value) {
     return `${String(Number(match[1])).padStart(2, "0")}:${match[2]}`;
 }
 
+function addMinutesToOnlineTime(time, minutes) {
+    const normalizedTime = normalizeOnlineTime(time);
+    const match = normalizedTime.match(/^(\d{2}):(\d{2})$/);
+    if (!match || !Number.isFinite(minutes)) return "";
+
+    const totalMinutes = Number(match[1]) * 60 + Number(match[2]) + minutes;
+    const wrappedMinutes = ((totalMinutes % 1440) + 1440) % 1440;
+    const hour = Math.floor(wrappedMinutes / 60);
+    const minute = wrappedMinutes % 60;
+    return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function parseDelayEstimateMinutes(delayEstimateText) {
+    const estimateMatch = normalizeOnlineText(delayEstimateText).match(
+        /約?\s*(\d+)\s*分遅れ.*発車予定/,
+    );
+    return estimateMatch ? Number(estimateMatch[1]) : 0;
+}
 function parseDelayMinutes(passInfoText, scheduledTime, predictedTime) {
     const infoMatch = normalizeOnlineText(passInfoText).match(
         /約?\s*(\d+)\s*分遅れ/,
@@ -67,6 +85,9 @@ function parseOnlineApproachHtml(html, direction) {
             const passInfoList = Array.from(
                 element.querySelectorAll("#passInfo"),
             ).map((item) => normalizeOnlineText(item.textContent));
+            const delayEstimateText = normalizeOnlineText(
+                element.querySelector(".passTimeStartDiffText")?.textContent,
+            );
             const passInfo =
                 passInfoList.find((item) =>
                     /運休|遅れ|定刻/.test(item),
@@ -77,20 +98,39 @@ function parseOnlineApproachHtml(html, direction) {
             const dest = destinationText.replace(/\s*行\s*$/, "");
             const suspensionFlg =
                 /運休/.test(passInfo) || /運休/.test(allText);
-            const delayMinutes = parseDelayMinutes(
-                passInfo,
-                timeData.scheduledTime,
-                timeData.predictedTime,
-            );
+            const delayEstimateMinutes = parseDelayEstimateMinutes(delayEstimateText);
+            const estimatedTime =
+                !timeData.predictedTime && delayEstimateMinutes >= 5
+                    ? addMinutesToOnlineTime(
+                          timeData.scheduledTime,
+                          delayEstimateMinutes,
+                      )
+                    : "";
+            const delayMinutes = timeData.predictedTime
+                ? parseDelayMinutes(
+                      passInfo,
+                      timeData.scheduledTime,
+                      timeData.predictedTime,
+                  )
+                : delayEstimateMinutes ||
+                  parseDelayMinutes(
+                      passInfo,
+                      timeData.scheduledTime,
+                      timeData.predictedTime,
+                  );
 
             if (!line || !dest || !timeData.scheduledTime) return null;
 
             return {
                 time: normalizeOnlineTime(timeData.scheduledTime),
                 predictedTime: normalizeOnlineTime(timeData.predictedTime),
+                delayEstimateTime: normalizeOnlineTime(estimatedTime),
+                delayEstimateMinutes,
                 delayMinutes,
                 delayText:
-                    delayMinutes >= 5 ? `約${delayMinutes}分遅れ` : "",
+                    delayMinutes >= 5
+                        ? `約${delayMinutes}分遅れ${estimatedTime ? "見込み" : ""}`
+                        : "",
                 line,
                 dir: direction,
                 onlineDest: dest,
@@ -154,6 +194,8 @@ function parseOfficialTimetableHtml(html, direction, routeDetails = {}) {
                 buses.push({
                     time: `${String(Number(hour)).padStart(2, "0")}:${String(Number(minute)).padStart(2, "0")}`,
                     predictedTime: "",
+                    delayEstimateTime: "",
+                    delayEstimateMinutes: 0,
                     delayMinutes: 0,
                     delayText: "",
                     line: routeName,

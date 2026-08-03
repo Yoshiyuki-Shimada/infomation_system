@@ -178,9 +178,14 @@ function calculateDiff(busTime, now, baseDate) {
     };
 }
 
+function getBusDelayBaseTime(bus) {
+    return bus.predictedTime || bus.delayEstimateTime || "";
+}
+
 function getBusRemovalTime(bus) {
-    if (bus.onlineFlg && bus.delayMinutes >= 5 && bus.predictedTime) {
-        return bus.predictedTime;
+    if (bus.onlineFlg && Number(bus.delayMinutes) >= 5) {
+        const delayBaseTime = getBusDelayBaseTime(bus);
+        if (delayBaseTime) return delayBaseTime;
     }
 
     return bus.time;
@@ -191,14 +196,22 @@ function calculateRemovalDiff(bus, now, baseDate) {
 }
 
 function getBusSortTime(bus) {
-    return bus.predictedTime || bus.time;
+    return getBusDelayBaseTime(bus) || bus.time;
 }
 
+function hasMajorDelayForDisplay(bus) {
+    return bus.onlineFlg && Number(bus.delayMinutes) >= 5 && !!getBusDelayBaseTime(bus);
+}
 function sortBusesByDisplayTime(buses, now, baseDate) {
     return [...buses].sort((a, b) => {
         const diffA = calculateDiff(getBusSortTime(a), now, baseDate).pure_seconds;
         const diffB = calculateDiff(getBusSortTime(b), now, baseDate).pure_seconds;
         if (diffA !== diffB) return diffA - diffB;
+
+        const aDelayed = hasMajorDelayForDisplay(a);
+        const bDelayed = hasMajorDelayForDisplay(b);
+        if (aDelayed !== bDelayed) return aDelayed ? 1 : -1;
+
         return a.time.localeCompare(b.time);
     });
 }
@@ -249,6 +262,8 @@ function mergeOnlineWithOfflineFallback(onlineBuses, offlineBuses) {
         merged.push({
             ...offlineBus,
             onlineFlg: false,
+            delayEstimateTime: "",
+            delayEstimateMinutes: 0,
             timetableFlg: true,
         });
     });
@@ -316,21 +331,21 @@ function refresh() {
     document.getElementById("date-small").textContent = dateStr;
 
     // --- バス路線の描画 ---
-    const displayedOikebashiBuses = renderBusList(
+    renderBusList(
         "list-oikebashi",
         schedule.oikebashi || [],
         now,
         opDate,
         3,
     ); // 守口車庫前・なんば方面（3本）
-    const displayedKumataBuses = renderBusList(
+    renderBusList(
         "list-kumata",
         schedule.kumata || [],
         now,
         opDate,
         2,
     ); // 杭全・出戸バスターミナル方面（2本）
-    const displayedAbenobashiBuses = renderBusList(
+    renderBusList(
         "list-abenobashi",
         schedule.abenobashi || [],
         now,
@@ -338,9 +353,24 @@ function refresh() {
         2,
     ); // あべの橋方面（2本）
 
-    updateTransferGuide("transfer-guide-oikebashi", displayedOikebashiBuses, now, opDate);
-    updateTransferGuide("transfer-guide-kumata", displayedKumataBuses, now, opDate);
-    updateTransferGuide("transfer-guide-abenobashi", displayedAbenobashiBuses, now, opDate);
+    updateTransferGuide(
+        "transfer-guide-oikebashi",
+        getTransferGuidePagingBuses(schedule.oikebashi || [], now, opDate, 3),
+        now,
+        opDate,
+    );
+    updateTransferGuide(
+        "transfer-guide-kumata",
+        getTransferGuidePagingBuses(schedule.kumata || [], now, opDate, 2),
+        now,
+        opDate,
+    );
+    updateTransferGuide(
+        "transfer-guide-abenobashi",
+        getTransferGuidePagingBuses(schedule.abenobashi || [], now, opDate, 2),
+        now,
+        opDate,
+    );
 }
 
 /**
@@ -386,6 +416,82 @@ function getTimetableFallbackStatus(bus, cycleSeconds) {
     return { text: "運行情報未取得", color: "#8c8f93" };
 }
 
+function isBusPagingTarget(bus, now, opDate) {
+    const scheduledSeconds = calculateDiff(bus.time, now, opDate).pure_seconds;
+    const removalSeconds = calculateRemovalDiff(bus, now, opDate).pure_seconds;
+
+    return scheduledSeconds <= 900 || removalSeconds <= 900;
+}
+
+function getBusPagingWindow(activeUpcoming, now, opDate, maxDisplay) {
+    let latestPagingTargetSeconds = null;
+
+    activeUpcoming.forEach((bus) => {
+        if (!isBusPagingTarget(bus, now, opDate)) return;
+
+        const displaySeconds = calculateDiff(
+            getBusSortTime(bus),
+            now,
+            opDate,
+        ).pure_seconds;
+        if (
+            latestPagingTargetSeconds === null ||
+            displaySeconds > latestPagingTargetSeconds
+        ) {
+            latestPagingTargetSeconds = displaySeconds;
+        }
+    });
+
+    if (latestPagingTargetSeconds === null) {
+        return activeUpcoming.slice(0, maxDisplay);
+    }
+
+    const pagingWindow = activeUpcoming.filter((bus) => {
+        return (
+            calculateDiff(getBusSortTime(bus), now, opDate).pure_seconds <=
+            latestPagingTargetSeconds
+        );
+    });
+
+    if (pagingWindow.length < maxDisplay) {
+        return activeUpcoming.slice(0, maxDisplay);
+    }
+
+    return pagingWindow;
+}
+
+function getTransferGuidePagingBuses(buses, now, opDate, maxDisplay) {
+    const activeUpcoming = sortBusesByDisplayTime(buses, now, opDate).filter(
+        (bus) => calculateRemovalDiff(bus, now, opDate).pure_seconds >= 175,
+    );
+    const pagingWindow = getBusPagingWindow(
+        activeUpcoming,
+        now,
+        opDate,
+        maxDisplay,
+    );
+
+    if (!pagingWindow.some((bus) => isBusPagingTarget(bus, now, opDate))) {
+        return [];
+    }
+
+    return pagingWindow;
+}
+
+function getLineNumberStyle(line) {
+    const lineText = String(line || "");
+    const lineColors = {
+        "73": { background: "#e44d93", color: "#fff" },
+        "85": { background: "#a9cc51", color: "#000" },
+        "13": { background: "#E60012", color: "#fff" },
+    };
+
+    if (lineText === "35" || lineText === "35A") return "";
+
+    const colors = lineColors[lineText] || { background: "#7d7d7d", color: "#fff" };
+    return ` style="background-color: ${colors.background}; color: ${colors.color};"`;
+}
+
 function renderBusList(id, buses, now, opDate, maxDisplay) {
     const el = document.getElementById(id);
     if (!el) return [];
@@ -401,23 +507,24 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
     let totalPages = 1;
     let pageIdx = 0; // 15分以内のバスが多い場合はページング
 
-    const within15 = activeUpcoming.filter(
-        (bus) => calculateRemovalDiff(bus, now, opDate).pure_seconds <= 900,
-    ); // 15分以内に発車するバスの本数が設定した maxDisplay より多いならページを分割して表示
+    const pagingWindow = getBusPagingWindow(
+        activeUpcoming,
+        now,
+        opDate,
+        maxDisplay,
+    );
 
-    if (within15.length > maxDisplay) {
-        // ← 4固定から maxDisplay 超過条件に変更！
-        const pageSize = maxDisplay; // ← 3固定から maxDisplay に変更！
-        totalPages = Math.ceil(within15.length / pageSize);
+    if (pagingWindow.length > maxDisplay) {
+        const pageSize = maxDisplay;
+        totalPages = Math.ceil(pagingWindow.length / pageSize);
         pageIdx = Math.floor(Date.now() / 15000) % totalPages;
-        displayBuses = within15.slice(
+        displayBuses = pagingWindow.slice(
             pageIdx * pageSize,
             pageIdx * pageSize + pageSize,
         );
         if (pageEl) pageEl.textContent = `${pageIdx + 1}/${totalPages}`;
     } else {
-        // 15分以内が少ない場合は、直近 maxDisplay 件を表示
-        displayBuses = allUpcoming.slice(0, maxDisplay); // ← 3固定から maxDisplay に変更！
+        displayBuses = activeUpcoming.slice(0, maxDisplay);
         if (pageEl) pageEl.textContent = "";
     }
 
@@ -616,6 +723,7 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
             const charHtml = imgName
                 ? `<div class="char-container"><img src="img/${imgName}" class="${charIconClass}"></div>`
                 : '<div class="char-container"></div>';
+            const lineNumberStyle = getLineNumberStyle(bus.line);
 
             return `
                 <div class="bus-row">
@@ -624,7 +732,7 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
                         <div class="status${hasMajorDelay && status === bus.delayText ? " delay-status" : ""}" style="color: ${status_color};">${status}</div>
                     </div>
 
-                    <div class="line-number">${bus.line}</div>
+                    <div class="line-number"${lineNumberStyle}>${bus.line}</div>
 
                     <div class="destination-info">
                         <div class="via">${info.via || "&nbsp;"}</div>
@@ -698,28 +806,13 @@ function createTransferGuideItemElement(bus) {
 }
 
 function getTransferGuideTargetBuses(displayedBuses, now, opDate) {
-    return displayedBuses
-        .filter((bus) => {
-            const scheduledSeconds = calculateDiff(
-                bus.time,
-                now,
-                opDate,
-            ).pure_seconds;
-            const removalSeconds = calculateRemovalDiff(
-                bus,
-                now,
-                opDate,
-            ).pure_seconds;
+    const activeGuideBuses = displayedBuses.filter((bus) => {
+        return calculateRemovalDiff(bus, now, opDate).pure_seconds >= 175;
+    });
 
-            return scheduledSeconds <= 900 && removalSeconds >= 175;
-        })
-        .sort((a, b) => {
-            return (
-                calculateDiff(a.time, now, opDate).pure_seconds -
-                calculateDiff(b.time, now, opDate).pure_seconds
-            );
-        })
-        .filter((bus) => getTransferGuideMessage(bus));
+    return sortBusesByDisplayTime(activeGuideBuses, now, opDate).filter((bus) =>
+        getTransferGuideMessage(bus),
+    );
 }
 
 function updateTransferGuide(elementId, displayedBuses, now, opDate) {

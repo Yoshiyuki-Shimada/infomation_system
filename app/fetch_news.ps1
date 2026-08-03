@@ -748,6 +748,84 @@ while ($true) {
     catch {
         Write-Host " [RAILWAY] 処理中にエラーが発生: $($_.Exception.Message)" -ForegroundColor Red
     }
+    # --- 大阪シティバス運行情報 ---
+    try {
+        $cityBusUrl = "https://citybus-osaka.co.jp/"
+        $cityBusResponse = Invoke-WebRequest `
+            -Uri $cityBusUrl `
+            -UserAgent $ua `
+            -UseBasicParsing `
+            -TimeoutSec 15
+        $cityBusHtml = ""
+
+        if ($cityBusResponse.RawContentStream) {
+            $cityBusResponse.RawContentStream.Position = 0
+            $cityBusReader = [System.IO.StreamReader]::new(
+                $cityBusResponse.RawContentStream,
+                [System.Text.Encoding]::UTF8,
+                $true
+            )
+            try {
+                $cityBusHtml = $cityBusReader.ReadToEnd()
+            }
+            finally {
+                $cityBusReader.Dispose()
+            }
+        }
+        else {
+            $cityBusHtml = [string]$cityBusResponse.Content
+        }
+
+        $cityBusInfoTexts = @()
+        $attentionMatches = [regex]::Matches(
+            $cityBusHtml,
+            '(?is)<(?<tag>[a-z0-9]+)\b[^>]*class=["''][^"'']*\bc-attention__inner\b[^"'']*["''][^>]*>(?<inner>.*?)</\k<tag>>'
+        )
+
+        foreach ($attentionMatch in $attentionMatches) {
+            $innerHtml = $attentionMatch.Groups["inner"].Value
+            $innerHtml = [regex]::Replace($innerHtml, '(?is)<script\b.*?</script>|<style\b.*?</style>', ' ')
+            $innerHtml = [regex]::Replace($innerHtml, '(?i)<br\s*/?>', ' ')
+            $plainText = [regex]::Replace($innerHtml, '<[^>]+>', ' ')
+            $plainText = [Net.WebUtility]::HtmlDecode($plainText)
+            $plainText = [regex]::Replace($plainText, '[\r\n\t\s]+', ' ').Trim()
+            $plainText = ($plainText -replace '^運行情報\s*', '').Trim()
+
+            if ([string]::IsNullOrWhiteSpace($plainText)) { continue }
+            if ($plainText -match '情報はありません|平常どおり|平常通り|通常どおり|通常通り') { continue }
+            if ($cityBusInfoTexts -notcontains $plainText) {
+                $cityBusInfoTexts += $plainText
+            }
+        }
+
+        foreach ($cityBusText in $cityBusInfoTexts) {
+            $cityBusColor = "yellow"
+            if ($cityBusText -match '運休|見合わせ|停止') {
+                $cityBusColor = "red"
+            }
+            elseif ($cityBusText -match '迂回|変更|お知らせ|可能性|計画') {
+                $cityBusColor = "orange"
+            }
+
+            $data.railway += @{
+                company  = "大阪シティバス";
+                name     = "大阪シティバス";
+                title    = "路線バス運行情報";
+                body     = $cityBusText;
+                msg      = $cityBusText;
+                color    = $cityBusColor;
+                lineCode = 1;
+            }
+            Write-Host "  -> [大阪シティバス] 運行情報を採用 ($cityBusColor)" -ForegroundColor Green
+        }
+
+        if ($cityBusInfoTexts.Count -eq 0) {
+            Write-Host "  -> [大阪シティバス] 表示対象の運行情報なし" -ForegroundColor Green
+        }
+    }
+    catch {
+        Write-Host "  -> [大阪シティバス] 運行情報取得エラー: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
     # --- 3. ニュース取得 (指定クラス highLightSearchTarget を抽出) ---
     # 除外ワードの定義
     $excludePattern = "スポーツ|連勝|連敗|勝利|敗北|競馬|ゴルフ|芸能|引き分け|アイドル|ミュージカル|野球|エンタメ|リーグ|ドラマ|映画|番組|詳しくはWeb|詳しくは動画|詳しくは気象動画|詳しくは天気動画"

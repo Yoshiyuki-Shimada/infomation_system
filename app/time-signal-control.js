@@ -92,7 +92,7 @@
         actionRunning = false;
         closeMenu();
         button.disabled = disabled;
-        button.textContent = paused ? "\u6642\u5831\u89e3\u9664" : "\u6642\u5831\u505c\u6b62";
+        button.textContent = paused ? "\u6642\u5831\u518d\u958b" : "\u6642\u5831\u505c\u6b62";
         document.body.classList.toggle("time-signal-paused", paused);
 
         if (disabled) {
@@ -183,14 +183,14 @@
 
         if (paused) {
             actionRunning = true;
-            statusElement.textContent = "\u89e3\u9664\u4e2d";
+            statusElement.textContent = "\u518d\u958b\u4e2d";
 
             try {
                 const status = await callApi("/resume");
                 renderStatus(status);
             } catch {
                 actionRunning = false;
-                statusElement.textContent = "\u89e3\u9664\u3067\u304d\u307e\u305b\u3093\u3067\u3057\u305f";
+                statusElement.textContent = "\u518d\u958b\u3067\u304d\u307e\u305b\u3093\u3067\u3057\u305f";
             }
             return;
         }
