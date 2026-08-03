@@ -41,6 +41,17 @@ function Ensure-TempDirectory {
     }
 }
 
+function Get-OperationDate {
+    param([datetime]$Now = (Get-Date))
+
+    $operationDate = $Now.Date
+    if ($Now.Hour -lt 4) {
+        $operationDate = $operationDate.AddDays(-1)
+    }
+
+    return $operationDate.ToString("yyyyMMdd")
+}
+
 function Get-TimetableUrl {
     param(
         [string]$StopCode,
@@ -260,7 +271,7 @@ while ($true) {
             }
         }
 
-        $operationDate = Get-Date -Format "yyyyMMdd"
+        $operationDate = Get-OperationDate
         $timetableCacheExpired = -not $timetableCacheFetchedAt -or
             ((Get-Date) - $timetableCacheFetchedAt).TotalMinutes -ge 30
         if (-not $timetableCache -or

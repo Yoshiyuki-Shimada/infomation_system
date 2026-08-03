@@ -11,9 +11,16 @@
     let actionRunning = false;
     let autoCloseTimer = null;
 
+    const quietControlResumeMinutes = 355;
+    const morningSignalResumeMinutes = 360;
+
+    function getMinutesOfDay(date) {
+        return date.getHours() * 60 + date.getMinutes();
+    }
+
     function isQuietHours(date = new Date()) {
-        const minutes = date.getHours() * 60 + date.getMinutes();
-        return minutes >= 0 && minutes < 355;
+        const minutes = getMinutesOfDay(date);
+        return minutes >= 0 && minutes < quietControlResumeMinutes;
     }
 
     function formatUntil(value) {
@@ -51,15 +58,36 @@
         return next;
     }
 
+    function normalizeResumeOptionDate(date) {
+        const minutes = getMinutesOfDay(date);
+        if (minutes <= 0 || minutes >= morningSignalResumeMinutes) return date;
+
+        const normalized = new Date(date);
+        normalized.setHours(6, 0, 0, 0);
+        return normalized;
+    }
+
     function getResumeOptions(now = new Date()) {
         const base = getNextSignalTime(now);
         const firstOptions = [10, 20, 30, 40, 50, 60].map((minutes) => addMinutes(base, minutes));
         const anchor = getNextHalfHourAfter(firstOptions[firstOptions.length - 1]);
         const anchorOptions = [0, 30, 60, 90, 120].map((minutes) => addMinutes(anchor, minutes));
-        return firstOptions.concat(anchorOptions).map((date) => ({
-            label: formatResumeLabel(date),
-            untilMs: date.getTime(),
-        }));
+        const uniqueOptions = [];
+        const seenUntilMs = new Set();
+
+        firstOptions.concat(anchorOptions).forEach((date) => {
+            const normalizedDate = normalizeResumeOptionDate(date);
+            const untilMs = normalizedDate.getTime();
+            if (seenUntilMs.has(untilMs)) return;
+
+            seenUntilMs.add(untilMs);
+            uniqueOptions.push({
+                label: formatResumeLabel(normalizedDate),
+                untilMs,
+            });
+        });
+
+        return uniqueOptions;
     }
 
     async function callApi(path) {

@@ -786,6 +786,12 @@ function refreshImazatoLinerDisplay() {
     updateImazatoLinerScreenOff(now);
     const isOutsideOnlineServiceHours =
         now.getHours() >= 1 && now.getHours() < 5;
+
+    if (isImazatoLinerNextServiceDayHidden(now)) {
+        showImazatoLinerServiceFinished();
+        return;
+    }
+
     const schedule = getImazatoLinerSchedule(now);
     if (!schedule) {
         showImazatoLinerAdjusting();
@@ -809,10 +815,6 @@ function refreshImazatoLinerDisplay() {
             : `● オンラインデータ（${updateTime}更新・${pollSeconds}秒間隔更新）`;
     });
 
-    if (isImazatoLinerNextServiceDayHidden(now)) {
-        showImazatoLinerServiceFinished();
-        return;
-    }
     const displayedOikebashiNorth = renderImazatoLinerList(
         "list-oikebashi-north",
         schedule.oikebashiNorth,
