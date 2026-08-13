@@ -3,6 +3,7 @@
     const button = document.getElementById("time-signal-toggle");
     const menu = document.getElementById("time-signal-menu");
     const statusElement = document.getElementById("time-signal-status");
+    const displayPowerOffButton = document.getElementById("display-power-off-toggle");
     if (!button || !menu || !statusElement) return;
 
     const autoCloseMs = 60000;
@@ -94,6 +95,28 @@
         const response = await fetch(`${apiBase}${path}`, { cache: "no-store" });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         return response.json();
+    }
+
+    async function turnDisplayOff() {
+        if (!displayPowerOffButton || displayPowerOffButton.disabled) return;
+
+        const originalText = displayPowerOffButton.textContent;
+        displayPowerOffButton.disabled = true;
+        displayPowerOffButton.textContent = "消灯中";
+
+        try {
+            await callApi("/display/off");
+            displayPowerOffButton.textContent = originalText;
+        } catch {
+            displayPowerOffButton.textContent = "消灯失敗";
+            setTimeout(() => {
+                displayPowerOffButton.textContent = originalText;
+            }, 2500);
+        } finally {
+            setTimeout(() => {
+                displayPowerOffButton.disabled = false;
+            }, 1200);
+        }
     }
 
     function clearAutoCloseTimer() {
@@ -229,6 +252,15 @@
         }
         closeMenu();
     });
+
+    if (displayPowerOffButton) {
+        displayPowerOffButton.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            closeMenu();
+            turnDisplayOff();
+        });
+    }
 
     menu.addEventListener("pointerdown", (event) => {
         resetAutoCloseTimer();
