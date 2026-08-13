@@ -1,4 +1,4 @@
-﻿# ==============================================================================
+# ==============================================================================
 # Snow Link Drone - Network Monitoring System
 # File Name: network_check.ps1
 # Description: インターネット接続を常時監視し、接続状況に応じてシステムを制御します。
@@ -9,19 +9,8 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $rootPath = Split-Path -Parent $scriptDir
 $tempPath = Join-Path $rootPath "temp"
 $appPath = Join-Path $rootPath "app"
-$soundPath = Join-Path $scriptDir "sound"
-
-# 音源ファイルのパス
-$disconnectionSound = Join-Path $soundPath "internet_disconnection_sound.mp3"
-$disconnectionVoice = Join-Path $soundPath "internet_disconnection_voice.mp3"
-$connectionSound = Join-Path $soundPath "network_connection_sound.mp3"
-$connectionVoice = Join-Path $soundPath "network_connection_voice.mp3"
-
 # 状態管理フラグ
 $isOnline = $null
-
-# .mp3再生用のライブラリ読み込み
-Add-Type -AssemblyName PresentationCore
 
 # ------------------------------------------------------------------------------
 # 関数定義
@@ -61,30 +50,6 @@ function Clear-OnlineTempData {
         Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-# 音声を再生する関数 (WAV用)
-function Play-Wav {
-    param([string]$FilePath)
-    # パスが空でなく、かつファイルが存在する場合のみ実行
-    if (![string]::IsNullOrEmpty($FilePath) -and (Test-Path $FilePath)) {
-        $player = New-Object System.Media.SoundPlayer
-        $player.SoundLocation = $FilePath
-        $player.Play()
-    }
-}
-
-# 音声を再生する関数 (MP3用)
-function Play-Mp3 {
-    param([string]$FilePath)
-    # パスが空でなく、かつファイルが存在する場合のみ実行
-    if (![string]::IsNullOrEmpty($FilePath) -and (Test-Path $FilePath)) {
-        $mediaPlayer = New-Object System.Windows.Media.MediaPlayer
-        $mediaPlayer.Open((New-Object System.Uri($FilePath)))
-        $mediaPlayer.Play()
-        # 再生が終わるまで少し待機
-        Start-Sleep -Seconds 5
-    }
-}
-
 # ------------------------------------------------------------------------------
 # 監視メインループ
 # ------------------------------------------------------------------------------
@@ -105,11 +70,7 @@ while ($true) {
         # オンラインデータ取得処理を終了してから、temp内を空にする
         Stop-OnlineDataFetchers
         Clear-OnlineTempData
-
-        # 切断音の再生
-        Play-Mp3 -FilePath $disconnectionSound
-        Play-Mp3 -FilePath $disconnectionVoice
-        
+        # 通知音・音声案内は鳴らさない。
         $isOnline = $false
     }
     elseif ($currentStatus -eq $true -and $isOnline -ne $true) {
@@ -118,27 +79,23 @@ while ($true) {
         # ---------------------------------------------------------
         # Forest Green (#4CCB8A)
         # Write-Host "[ONLINE] インターネットに接続されました。" -ForegroundColor "#4CCB8A"
-        
-        # 1. 接続音の再生
-        Play-Mp3 -FilePath $connectionSound
-        Play-Mp3 -FilePath $connectionVoice
-        
-        # 2. 多重起動防止：既存のオンライン取得処理を終了
+        # 通知音・音声案内は鳴らさない。
+        # 1. 多重起動防止：既存のオンライン取得処理を終了
         Stop-OnlineDataFetchers
         
-        # 3. ニュース取得プログラムを隠しウィンドウで再開
+        # 2. ニュース取得プログラムを隠しウィンドウで再開
         $fetchNewsScript = Join-Path $appPath "fetch_news.ps1"
         if (Test-Path $fetchNewsScript) {
             Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File ""$fetchNewsScript""" -WindowStyle Hidden
         }
 
-        # 4. バスオンライン情報取得プログラムを再開
+        # 3. バスオンライン情報取得プログラムを再開
         $fetchBusScript = Join-Path $appPath "fetch_bus.ps1"
         if (Test-Path $fetchBusScript) {
             Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File ""$fetchBusScript""" -WindowStyle Hidden
         }
 
-        # 5. いまざとライナーオンライン情報取得プログラムを再開
+        # 4. いまざとライナーオンライン情報取得プログラムを再開
         $fetchImazatoLinerScript = Join-Path $appPath "fetch_imazato_liner.ps1"
         if (Test-Path $fetchImazatoLinerScript) {
             Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File ""$fetchImazatoLinerScript""" -WindowStyle Hidden

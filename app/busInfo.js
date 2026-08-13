@@ -805,10 +805,17 @@ function createTransferGuideItemElement(bus) {
     return itemElement;
 }
 
+function isTransferGuideTarget(bus, now, opDate) {
+    const scheduledSeconds = calculateDiff(bus.time, now, opDate).pure_seconds;
+    const removalSeconds = calculateRemovalDiff(bus, now, opDate).pure_seconds;
+
+    return scheduledSeconds <= 900 && removalSeconds >= 175;
+}
+
 function getTransferGuideTargetBuses(displayedBuses, now, opDate) {
-    const activeGuideBuses = displayedBuses.filter((bus) => {
-        return calculateRemovalDiff(bus, now, opDate).pure_seconds >= 175;
-    });
+    const activeGuideBuses = displayedBuses.filter((bus) =>
+        isTransferGuideTarget(bus, now, opDate),
+    );
 
     return sortBusesByDisplayTime(activeGuideBuses, now, opDate).filter((bus) =>
         getTransferGuideMessage(bus),

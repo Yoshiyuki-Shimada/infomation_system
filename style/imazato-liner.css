@@ -193,7 +193,8 @@
     border-bottom: 2px solid var(--snow-white);
 }
 
-.time-signal-toggle {
+.time-signal-toggle,
+.display-power-off-toggle {
     width: 100%;
     min-height: 48px;
     border: 2px solid var(--sky-yellow);
@@ -205,7 +206,8 @@
     touch-action: manipulation;
 }
 
-.time-signal-toggle:disabled {
+.time-signal-toggle:disabled,
+.display-power-off-toggle:disabled {
     border-color: #555;
     background: #333;
     color: #888;
@@ -216,6 +218,20 @@
     border-color: var(--alert-red-bg);
     background: var(--alert-red-bg);
     color: #fff;
+}
+
+.display-power-off-toggle {
+    margin-top: 10px;
+    border-color: var(--sky-blue);
+    background: #102940;
+    color: var(--snow-white);
+}
+
+.display-power-off-toggle:active,
+.display-power-off-toggle:hover,
+.display-power-off-toggle:focus-visible {
+    background: #174568;
+    border-color: var(--sky-yellow);
 }
 
 .time-signal-status {
@@ -295,7 +311,8 @@
         grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 150px;
     }
 
-    .time-signal-toggle {
+    .time-signal-toggle,
+.display-power-off-toggle {
         font-size: 1.02rem;
     }
 

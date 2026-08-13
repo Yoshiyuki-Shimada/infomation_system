@@ -1,4 +1,4 @@
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+﻿[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 # 実行ディレクトリ基準
 Set-Location $PSScriptRoot
@@ -9,6 +9,42 @@ $eewPriorityPath = Join-Path $projectDir "temp\eew_audio_priority.lock"
 $timeSignalPausePath = Join-Path $projectDir "temp\time_signal_pause_until.txt"
 $timeSignalControlPort = 18765
 $timeSignalControlListener = $null
+
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+
+public static class TimeSignalDisplayPowerNativeMethods
+{
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool PostMessage(
+        IntPtr hWnd,
+        int Msg,
+        IntPtr wParam,
+        IntPtr lParam);
+}
+"@
+
+function Send-DisplayPowerOffCommand {
+    $hwndBroadcast = [IntPtr]::new(0xffff)
+    $wmSysCommand = 0x0112
+    $scMonitorPower = 0xF170
+    $monitorPowerOff = 2
+
+    [TimeSignalDisplayPowerNativeMethods]::PostMessage(
+        $hwndBroadcast,
+        $wmSysCommand,
+        [IntPtr]::new($scMonitorPower),
+        [IntPtr]::new($monitorPowerOff)) | Out-Null
+}
+
+function Get-DisplayPowerStatusJson {
+    $payload = [ordered]@{
+        ok = $true
+        now = (Get-Date).ToString("o")
+    }
+    return ($payload | ConvertTo-Json -Compress)
+}
 
 function Get-TimeSignalResetTime {
     param([datetime]$Now)
@@ -122,6 +158,11 @@ function Invoke-TimeSignalControlRequest {
     param([string]$Target)
 
     $uri = [Uri]::new("http://127.0.0.1:$timeSignalControlPort$Target")
+    if ($uri.AbsolutePath -eq "/time-signal/display/off") {
+        Send-DisplayPowerOffCommand
+        return Get-DisplayPowerStatusJson
+    }
+
     if ($uri.AbsolutePath -eq "/time-signal/resume") {
         Clear-TimeSignalPause
         return Get-TimeSignalPauseStatusJson

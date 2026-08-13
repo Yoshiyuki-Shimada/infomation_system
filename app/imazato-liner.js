@@ -460,15 +460,21 @@ function getImazatoLinerSchedule(now = new Date()) {
     return imazatoLinerState.schedule;
 }
 
-function getSecondsUntilImazatoLiner(time, now) {
+function getImazatoLinerDateTime(time, now) {
     const [hour, minute] = time.split(":").map(Number);
-    return (
-        hour * 3600 +
-        minute * 60 -
-        (now.getHours() * 3600 +
-            now.getMinutes() * 60 +
-            now.getSeconds())
-    );
+    const busDate = getImazatoLinerOperationalDate(now);
+    busDate.setHours(hour, minute, 0, 0);
+
+    if (hour < 4) {
+        busDate.setDate(busDate.getDate() + 1);
+    }
+
+    return busDate;
+}
+
+function getSecondsUntilImazatoLiner(time, now) {
+    const busDate = getImazatoLinerDateTime(time, now);
+    return Math.floor((busDate.getTime() - now.getTime()) / 1000);
 }
 
 function formatImazatoLinerYmd(date) {
