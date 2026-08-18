@@ -133,15 +133,20 @@ function normalizeImazatoLinerText(value) {
         .trim();
 }
 
-function parseImazatoLinerTime(passTimeText) {
+function parseImazatoLinerTime(passTimeText, passTimeInfoText) {
     const text = normalizeImazatoLinerText(passTimeText);
+    const infoText = normalizeImazatoLinerText(passTimeInfoText);
     const scheduledMatch = text.match(/定刻\s*(\d{1,2}:\d{2})/);
+    const scheduledDepartureMatch = infoText.match(/(\d{1,2}:\d{2})\s*発/);
     const predictedMatch = text.match(/予測\s*(\d{1,2}:\d{2})/);
     const simpleMatch = text.match(/(\d{1,2}:\d{2})/);
+    const scheduledTime =
+        scheduledMatch?.[1] || scheduledDepartureMatch?.[1] || simpleMatch?.[1] || "";
 
     return {
-        scheduledTime: scheduledMatch?.[1] || simpleMatch?.[1] || "",
+        scheduledTime,
         predictedTime: predictedMatch?.[1] || "",
+        scheduledTimeExplicit: !!(scheduledMatch || scheduledDepartureMatch),
     };
 }
 
@@ -324,7 +329,8 @@ function mergeImazatoLinerOnlineWithTimetable(onlineBuses, timetableBuses) {
                 timetableFlg: true,
                 serviceUnavailableFlg: false,
             };
-        } else {
+        } else if (onlineBus.scheduledTimeExplicit || timetableBuses.length === 0) {
+            // いまどこが予測時刻だけを表示する場合は、時刻表にない便として追加しない。
             merged.push({
                 ...onlineBus,
                 onlineFlg: true,
@@ -361,6 +367,9 @@ function parseImazatoLinerApproachHtml(html) {
             const passTimeText = normalizeImazatoLinerText(
                 element.querySelector("#passTimeFromText")?.textContent,
             );
+            const passTimeInfoText = normalizeImazatoLinerText(
+                element.querySelector("#passTimeInfo")?.textContent,
+            );
             const passInfoList = Array.from(
                 element.querySelectorAll("#passInfo"),
             ).map((item) => normalizeImazatoLinerText(item.textContent));
@@ -368,7 +377,7 @@ function parseImazatoLinerApproachHtml(html) {
                 passInfoList.find((item) =>
                     /驕倶ｼ掃驕・ｌ|螳壼綾/.test(item),
                 ) || passInfoList.join(" ");
-            const time = parseImazatoLinerTime(passTimeText);
+            const time = parseImazatoLinerTime(passTimeText, passTimeInfoText);
             const allText = normalizeImazatoLinerText(element.textContent);
             const delayMinutes = calculateImazatoLinerDelay(passInfo);
 
@@ -377,6 +386,7 @@ function parseImazatoLinerApproachHtml(html) {
             return {
                 time: normalizeImazatoLinerTime(time.scheduledTime),
                 predictedTime: normalizeImazatoLinerTime(time.predictedTime),
+                scheduledTimeExplicit: time.scheduledTimeExplicit,
                 line,
                 destination,
                 delayMinutes,

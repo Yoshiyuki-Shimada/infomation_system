@@ -15,15 +15,20 @@ function normalizeOnlineText(value) {
         .trim();
 }
 
-function parseOnlineTime(passTimeText) {
+function parseOnlineTime(passTimeText, passTimeInfoText) {
     const text = normalizeOnlineText(passTimeText);
+    const infoText = normalizeOnlineText(passTimeInfoText);
     const scheduledMatch = text.match(/定刻\s*(\d{1,2}:\d{2})/);
+    const scheduledDepartureMatch = infoText.match(/(\d{1,2}:\d{2})\s*発/);
     const predictedMatch = text.match(/予測\s*(\d{1,2}:\d{2})/);
     const simpleMatch = text.match(/(\d{1,2}:\d{2})/);
+    const scheduledTime =
+        scheduledMatch?.[1] || scheduledDepartureMatch?.[1] || simpleMatch?.[1] || "";
 
     return {
-        scheduledTime: scheduledMatch?.[1] || simpleMatch?.[1] || "",
+        scheduledTime,
         predictedTime: predictedMatch?.[1] || "",
+        scheduledTimeExplicit: !!(scheduledMatch || scheduledDepartureMatch),
     };
 }
 
@@ -82,6 +87,9 @@ function parseOnlineApproachHtml(html, direction) {
             const passTimeText = normalizeOnlineText(
                 element.querySelector("#passTimeFromText")?.textContent,
             );
+            const passTimeInfoText = normalizeOnlineText(
+                element.querySelector("#passTimeInfo")?.textContent,
+            );
             const passInfoList = Array.from(
                 element.querySelectorAll("#passInfo"),
             ).map((item) => normalizeOnlineText(item.textContent));
@@ -92,7 +100,7 @@ function parseOnlineApproachHtml(html, direction) {
                 passInfoList.find((item) =>
                     /運休|遅れ|定刻/.test(item),
                 ) || passInfoList.join(" ");
-            const timeData = parseOnlineTime(passTimeText);
+            const timeData = parseOnlineTime(passTimeText, passTimeInfoText);
             const allText = normalizeOnlineText(element.textContent);
             const line = routeText.replace(/\s*号\s*$/, "");
             const dest = destinationText.replace(/\s*行\s*$/, "");
@@ -125,6 +133,7 @@ function parseOnlineApproachHtml(html, direction) {
                 time: normalizeOnlineTime(timeData.scheduledTime),
                 predictedTime: normalizeOnlineTime(timeData.predictedTime),
                 delayEstimateTime: normalizeOnlineTime(estimatedTime),
+                scheduledTimeExplicit: timeData.scheduledTimeExplicit,
                 delayEstimateMinutes,
                 delayMinutes,
                 delayText:
@@ -299,7 +308,8 @@ function mergeOnlineWithTimetable(onlineBuses, timetableBuses) {
                 timetableFlg: true,
                 serviceUnavailableFlg: false,
             };
-        } else {
+        } else if (onlineBus.scheduledTimeExplicit || timetableBuses.length === 0) {
+            // いまどこが予測時刻だけを表示する場合は、時刻表にない便として追加しない。
             merged.push(onlineBus);
         }
     });

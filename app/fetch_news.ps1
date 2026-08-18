@@ -382,13 +382,19 @@ while ($true) {
 
                     $sectionCondition = [string]$sec.conditionName
                     $sectionDirection = [string]$sec.upAndDown
-                    $sectionPrefix = if ([string]::IsNullOrWhiteSpace($sectionDirection)) { "" } else { "[$sectionDirection] " }
+                    $isSanyoShinkansen = $DisplayName -eq "山陽新幹線"
+                    $isSingleDirection =
+                        $isSanyoShinkansen -and
+                        $sectionDirection -match "上り|下り" -and
+                        $sectionDirection -notmatch "上下|両|上り.*下り|下り.*上り"
+                    $sectionPrefix = if ($isSanyoShinkansen -or [string]::IsNullOrWhiteSpace($sectionDirection)) { "" } else { "[$sectionDirection] " }
+                    $sectionSeparator = if ($isSingleDirection) { "　→　" } else { "　～　" }
 
                     if ($sec.endStation -eq "" -or $null -eq $sec.endStation) {
                         $secList += "$sectionPrefix$($sec.startStation)（$sectionCondition）"
                     }
                     else {
-                        $secList += "$sectionPrefix$($sec.startStation)　～　$($sec.endStation)（$sectionCondition）"
+                        $secList += "$sectionPrefix$($sec.startStation)$sectionSeparator$($sec.endStation)（$sectionCondition）"
                     }
 
                     if ($sectionCondition -match "見合わせ|取り止め|運休|運転休止") { $maxSev = 3 }
