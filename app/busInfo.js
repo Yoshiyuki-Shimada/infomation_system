@@ -481,12 +481,12 @@ function getTransferGuidePagingBuses(buses, now, opDate, maxDisplay) {
 function getLineNumberStyle(line) {
     const lineText = String(line || "");
     const lineColors = {
+        "35": { background: "#019a66", color: "#fff" },
+        "35A": { background: "#00d084", color: "#fff" },
         "73": { background: "#e44d93", color: "#fff" },
         "85": { background: "#a9cc51", color: "#000" },
         "13": { background: "#E60012", color: "#fff" },
     };
-
-    if (lineText === "35" || lineText === "35A") return "";
 
     const colors = lineColors[lineText] || { background: "#7d7d7d", color: "#fff" };
     return ` style="background-color: ${colors.background}; color: ${colors.color};"`;
@@ -878,7 +878,10 @@ function getTravelStatus(diff, diff_sec_pure, suppressGiveUp) {
     if (diff <= 8) {
         return { text: "早歩きで間に合う", color: "#ffe766" };
     }
-    return { text: "歩いても間に合う", color: "#38d5ff" };
+    return {
+        text: "歩いても間に合う",
+        color: diff_sec_pure <= 600 ? "#019a66" : "#38d5ff",
+    };
 }
 
 function visibleTime(
@@ -915,7 +918,7 @@ function visibleTime(
 
     return {
         text: `あと${displayMinutes}分${displaySeconds}秒`,
-        color: diff > 8 ? "#38d5ff" : "#ffe766",
+        color: diff > 8 && diff_sec_pure <= 600 ? "#019a66" : diff > 8 ? "#38d5ff" : "#ffe766",
     };
 }
 
