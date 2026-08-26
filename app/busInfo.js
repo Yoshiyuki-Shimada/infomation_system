@@ -179,10 +179,30 @@ function calculateDiff(busTime, now, baseDate) {
 }
 
 function getBusDelayBaseTime(bus) {
-    return bus.predictedTime || bus.delayEstimateTime || "";
+    if (bus.predictedTime) return bus.predictedTime;
+    if (bus.delayEstimateTime) return bus.delayEstimateTime;
+
+    return "";
 }
 
-function getBusRemovalTime(bus) {
+function isStartDepartureUndetected(bus, now, baseDate) {
+    if (!bus.onlineFlg || !bus.startDepartureUndetectedFlg) return false;
+    if (!bus.startDepartureTime) return false;
+
+    const startDiffSeconds = calculateDiff(
+        bus.startDepartureTime,
+        now,
+        baseDate,
+    ).pure_seconds;
+
+    return startDiffSeconds <= -300;
+}
+
+function getBusRemovalTime(bus, now, baseDate) {
+    if (isStartDepartureUndetected(bus, now, baseDate)) {
+        return bus.predictedTime || "";
+    }
+
     if (bus.onlineFlg && Number(bus.delayMinutes) >= 5) {
         const delayBaseTime = getBusDelayBaseTime(bus);
         if (delayBaseTime) return delayBaseTime;
@@ -192,15 +212,24 @@ function getBusRemovalTime(bus) {
 }
 
 function calculateRemovalDiff(bus, now, baseDate) {
-    return calculateDiff(getBusRemovalTime(bus), now, baseDate);
+    const removalTime = getBusRemovalTime(bus, now, baseDate);
+    if (!removalTime && isStartDepartureUndetected(bus, now, baseDate)) {
+        return { minutes: 9999, seconds: 0, pure_seconds: 999999 };
+    }
+
+    return calculateDiff(removalTime || bus.time, now, baseDate);
 }
 
 function getBusSortTime(bus) {
     return getBusDelayBaseTime(bus) || bus.time;
 }
 
-function hasMajorDelayForDisplay(bus) {
-    return bus.onlineFlg && Number(bus.delayMinutes) >= 5 && !!getBusDelayBaseTime(bus);
+function hasMajorDelayForDisplay(bus, now, baseDate) {
+    return (
+        bus.onlineFlg &&
+        ((Number(bus.delayMinutes) >= 5 && !!getBusDelayBaseTime(bus)) ||
+            isStartDepartureUndetected(bus, now, baseDate))
+    );
 }
 function sortBusesByDisplayTime(buses, now, baseDate) {
     return [...buses].sort((a, b) => {
@@ -208,8 +237,8 @@ function sortBusesByDisplayTime(buses, now, baseDate) {
         const diffB = calculateDiff(getBusSortTime(b), now, baseDate).pure_seconds;
         if (diffA !== diffB) return diffA - diffB;
 
-        const aDelayed = hasMajorDelayForDisplay(a);
-        const bDelayed = hasMajorDelayForDisplay(b);
+        const aDelayed = hasMajorDelayForDisplay(a, now, baseDate);
+        const bDelayed = hasMajorDelayForDisplay(b, now, baseDate);
         if (aDelayed !== bDelayed) return aDelayed ? 1 : -1;
 
         return a.time.localeCompare(b.time);
@@ -417,6 +446,8 @@ function getTimetableFallbackStatus(bus, cycleSeconds) {
 }
 
 function isBusPagingTarget(bus, now, opDate) {
+    if (isStartDepartureUndetected(bus, now, opDate)) return true;
+
     const scheduledSeconds = calculateDiff(bus.time, now, opDate).pure_seconds;
     const removalSeconds = calculateRemovalDiff(bus, now, opDate).pure_seconds;
 
@@ -584,12 +615,14 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
                 cycleSeconds,
             );
             const isWaitingForOnlineInfo = !!timetableFallbackStatus;
-            const hasMajorDelay = bus.onlineFlg && Number(bus.delayMinutes) >= 5;
+            const startDepartureUndetected = isStartDepartureUndetected(bus, now, opDate);
+            const hasMajorDelay = hasMajorDelayForDisplay(bus, now, opDate);
             const predictedSeconds = pureSeconds;
-            const delayStatusInfo =
-                hasMajorDelay && bus.delayText
-                    ? { text: bus.delayText, color: "#e02135" }
-                    : null;
+            const delayStatusInfo = startDepartureUndetected
+                ? { text: "始発発車未検知", color: "#e02135" }
+                : hasMajorDelay && bus.delayText
+                  ? { text: bus.delayText, color: "#e02135" }
+                  : null;
             const lastInfo = bus.lastFlg
                 ? { text: "\u6700\u7d42", color: "#e02135" }
                 : null;

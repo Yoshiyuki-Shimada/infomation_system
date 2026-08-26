@@ -314,11 +314,51 @@ while ($true) {
             return ""
         }
 
+        function Get-JRWestVersionDetailSortTicks {
+            param($VersionDetail)
+
+            $datePropertyNames = @(
+                "updatedAt",
+                "updateAt",
+                "updatedTime",
+                "updateTime",
+                "publishedAt",
+                "publishTime",
+                "createdAt"
+            )
+
+            foreach ($propertyName in $datePropertyNames) {
+                $rawValue = [string]$VersionDetail.$propertyName
+                if ([string]::IsNullOrWhiteSpace($rawValue)) { continue }
+
+                $parsedDate = [datetimeoffset]::MinValue
+                if ([datetimeoffset]::TryParse($rawValue, [ref]$parsedDate)) {
+                    return $parsedDate.UtcTicks
+                }
+            }
+
+            return [datetimeoffset]::MinValue.UtcTicks
+        }
+
+        function Get-JRWestVersionDetailSortId {
+            param($VersionDetail)
+
+            $parsedId = [int64]0
+            if ([int64]::TryParse([string]$VersionDetail.id, [ref]$parsedId)) {
+                return $parsedId
+            }
+            return 0
+        }
+
         function Get-JRWestLatestVersionDetail {
             param($Detail)
 
             if (-not $Detail.versionDetail) { return $null }
-            return $Detail.versionDetail | Sort-Object id -Descending | Select-Object -First 1
+            return @($Detail.versionDetail) |
+                Sort-Object `
+                    @{ Expression = { Get-JRWestVersionDetailSortTicks -VersionDetail $_ }; Descending = $true },
+                    @{ Expression = { Get-JRWestVersionDetailSortId -VersionDetail $_ }; Descending = $true } |
+                Select-Object -First 1
         }
 
         function Get-JRWestTrafficColor {

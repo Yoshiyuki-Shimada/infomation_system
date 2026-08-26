@@ -6,7 +6,7 @@ let emergencyInfoTimerId = null;
 let emergencyInfoState = { recentId: "", mode: "a", index: 0, startedAt: 0 };
 const DEFAULT_SLIDE_INTERVAL_MS = 30000;
 const SCROLL_END_WAIT_MS = 10000;
-const SCROLL_START_DELAY_MS = 0;
+const SCROLL_START_DELAY_MS = 10000;
 const EMERGENCY_INFO_FRAME_INTERVAL_MS = 5000;
 const EMERGENCY_RECENT_REPEAT_MS = 5 * 60 * 1000;
 
@@ -171,6 +171,19 @@ function getActiveEarthquakeData() {
         : null;
 }
 
+function getUpdateSignature(value) {
+    try {
+        const text = JSON.stringify(value || null) || "";
+        let hash = 0;
+        for (let index = 0; index < text.length; index += 1) {
+            hash = (hash * 31 + text.charCodeAt(index)) >>> 0;
+        }
+        return `${text.length}:${hash.toString(16)}`;
+    } catch {
+        return String(Date.now());
+    }
+}
+
 function updateSignage() {
     const activeEarthquakeData = getActiveEarthquakeData();
     const hasSignageData = typeof signageData !== "undefined" && signageData !== null;
@@ -195,7 +208,8 @@ function updateSignage() {
         };
     }
 
-    const updateKey = `${signageData.updateTime || ""}|${activeEarthquakeData?.updateTime || ""}`;
+    const railwayUpdateSignature = getUpdateSignature(signageData.railway || []);
+    const updateKey = `${signageData.updateTime || ""}|${railwayUpdateSignature}|${activeEarthquakeData?.updateTime || ""}`;
     if (updateKey === lastUpdateTime) return;
 
     console.log("最終更新:" + lastUpdateTime);
@@ -780,6 +794,15 @@ function scheduleNextSlide(intervalMs = DEFAULT_SLIDE_INTERVAL_MS) {
     slideTimerId = setTimeout(showSlide, intervalMs);
 }
 
+function resetAutoScrollContent(content) {
+    content.getAnimations?.().forEach((animation) => animation.cancel());
+    content.classList.remove("is-scrolling");
+    content.style.transform = "translateY(0)";
+    content.style.removeProperty("--auto-scroll-distance");
+    content.style.removeProperty("--auto-scroll-duration");
+    content.style.removeProperty("--auto-scroll-delay");
+}
+
 function prepareAutoScroll(slide) {
     const viewport = slide.querySelector(".auto-scroll-viewport");
     if (!viewport) return DEFAULT_SLIDE_INTERVAL_MS;
@@ -787,26 +810,39 @@ function prepareAutoScroll(slide) {
     const content = viewport.querySelector(".auto-scroll-content");
     if (!content) return DEFAULT_SLIDE_INTERVAL_MS;
 
-    content.classList.remove("is-scrolling");
-    content.style.removeProperty("--auto-scroll-distance");
-    content.style.removeProperty("--auto-scroll-duration");
-    content.style.removeProperty("--auto-scroll-delay");
+    resetAutoScrollContent(content);
     void content.offsetHeight;
 
-    const distance = content.scrollHeight - viewport.clientHeight;
+    const distance = Math.max(0, content.scrollHeight - viewport.clientHeight);
     if (distance <= 4) return DEFAULT_SLIDE_INTERVAL_MS;
 
     const duration = Math.min(60, Math.max(20, distance / 8));
+    const durationMs = duration * 1000;
     content.style.setProperty("--auto-scroll-distance", `-${distance}px`);
     content.style.setProperty("--auto-scroll-duration", `${duration}s`);
     content.style.setProperty("--auto-scroll-delay", `${SCROLL_START_DELAY_MS}ms`);
-    content.classList.add("is-scrolling");
+
+    if (typeof content.animate === "function") {
+        content.animate(
+            [
+                { transform: "translateY(0)" },
+                { transform: `translateY(-${distance}px)` },
+            ],
+            {
+                delay: SCROLL_START_DELAY_MS,
+                duration: durationMs,
+                easing: "linear",
+                fill: "forwards",
+            },
+        );
+    } else {
+        content.classList.add("is-scrolling");
+    }
 
     const scrollCompleteInterval =
-        SCROLL_START_DELAY_MS + duration * 1000 + SCROLL_END_WAIT_MS;
+        SCROLL_START_DELAY_MS + durationMs + SCROLL_END_WAIT_MS;
     return Math.max(DEFAULT_SLIDE_INTERVAL_MS, scrollCompleteInterval);
 }
-
 /**
  * 文章を句点（。）で区切り、指定文字数を超えないように分割する
  */
