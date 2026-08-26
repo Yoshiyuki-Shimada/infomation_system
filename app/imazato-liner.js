@@ -158,6 +158,52 @@ function calculateImazatoLinerDelay(passInfo) {
     return 0;
 }
 
+function hasImazatoLinerDelayEstimateNotice(delayEstimateText) {
+    return /約?\s*\d+\s*分遅れ.*発車(?:予定|見込み)/.test(
+        normalizeImazatoLinerText(delayEstimateText),
+    );
+}
+
+function parseImazatoLinerStartDepartureTime(value) {
+    const text = normalizeImazatoLinerText(value);
+    const plannedMatch = text.match(
+        /(?:予測|予定|見込み|発車予定)\s*(\d{1,2}:\d{2})/,
+    );
+    const timeMatches = Array.from(text.matchAll(/(\d{1,2}:\d{2})/g));
+
+    return plannedMatch?.[1] || timeMatches.at(-1)?.[1] || "";
+}
+
+function parseImazatoLinerStartScheduledTime(value) {
+    const match = normalizeImazatoLinerText(value).match(/定刻\s*(\d{1,2}:\d{2})/);
+    return match?.[1] || "";
+}
+
+function parseImazatoLinerDepartureTime(value) {
+    const match = normalizeImazatoLinerText(value).match(/(\d{1,2}:\d{2})\s*発?/);
+    return match?.[1] || "";
+}
+
+function getImazatoLinerMinutesOfDay(time) {
+    const normalizedTime = normalizeImazatoLinerTime(time);
+    const match = normalizedTime.match(/^(\d{2}):(\d{2})$/);
+    if (!match) return null;
+
+    return Number(match[1]) * 60 + Number(match[2]);
+}
+
+function calculateImazatoLinerTimeDiffMinutes(baseTime, targetTime) {
+    const baseMinutes = getImazatoLinerMinutesOfDay(baseTime);
+    const targetMinutes = getImazatoLinerMinutesOfDay(targetTime);
+    if (baseMinutes === null || targetMinutes === null) return 0;
+
+    let diffMinutes = targetMinutes - baseMinutes;
+    if (diffMinutes < -720) diffMinutes += 1440;
+    if (diffMinutes > 720) diffMinutes -= 1440;
+
+    return Math.max(0, diffMinutes);
+}
+
 function normalizeImazatoLinerTime(value) {
     const match = normalizeImazatoLinerText(value).match(/^(\d{1,2}):(\d{2})$/);
     if (!match) return normalizeImazatoLinerText(value);
@@ -256,6 +302,9 @@ function parseImazatoLinerOfficialTimetableHtml(
                 buses.push({
                     time: `${String(Number(hour)).padStart(2, "0")}:${String(Number(minute)).padStart(2, "0")}`,
                     predictedTime: "",
+                    startDepartureTime: "",
+                    startDepartureDelayMinutes: 0,
+                    startDepartureUndetectedFlg: false,
                     line,
                     destination,
                     delayMinutes: 0,
@@ -373,12 +422,34 @@ function parseImazatoLinerApproachHtml(html) {
             const passInfoList = Array.from(
                 element.querySelectorAll("#passInfo"),
             ).map((item) => normalizeImazatoLinerText(item.textContent));
+            const delayEstimateText = normalizeImazatoLinerText(
+                element.querySelector(".passTimeStartDiffText")?.textContent,
+            );
+            const startDepartureText = normalizeImazatoLinerText(
+                element.querySelector("#passTimeStartText-start")?.textContent,
+            );
             const passInfo =
                 passInfoList.find((item) =>
                     /驕倶ｼ掃驕・ｌ|螳壼綾/.test(item),
                 ) || passInfoList.join(" ");
             const time = parseImazatoLinerTime(passTimeText, passTimeInfoText);
             const allText = normalizeImazatoLinerText(element.textContent);
+            const startDepartureTime = normalizeImazatoLinerTime(
+                parseImazatoLinerStartDepartureTime(startDepartureText),
+            );
+            const startScheduledTime =
+                parseImazatoLinerStartScheduledTime(startDepartureText) ||
+                parseImazatoLinerDepartureTime(passTimeInfoText) ||
+                time.scheduledTime;
+            const startDepartureDelayMinutes =
+                calculateImazatoLinerTimeDiffMinutes(
+                    startScheduledTime,
+                    startDepartureTime,
+                );
+            const startDepartureUndetectedFlg =
+                !!startDepartureTime &&
+                /発車前/.test(allText) &&
+                !hasImazatoLinerDelayEstimateNotice(delayEstimateText);
             const delayMinutes = calculateImazatoLinerDelay(passInfo);
 
             if (!time.scheduledTime || !destination) return null;
@@ -387,6 +458,9 @@ function parseImazatoLinerApproachHtml(html) {
                 time: normalizeImazatoLinerTime(time.scheduledTime),
                 predictedTime: normalizeImazatoLinerTime(time.predictedTime),
                 scheduledTimeExplicit: time.scheduledTimeExplicit,
+                startDepartureTime,
+                startDepartureDelayMinutes,
+                startDepartureUndetectedFlg,
                 line,
                 destination,
                 delayMinutes,
@@ -509,6 +583,31 @@ function isImazatoLinerNextServiceDayHidden(now) {
     return timetableDate !== operationalDateKey;
 }
 
+function isImazatoLinerStartDepartureUndetected(bus, now) {
+    if (!bus.onlineFlg || !bus.startDepartureUndetectedFlg) return false;
+    if (!bus.startDepartureTime) return false;
+
+    return getSecondsUntilImazatoLiner(bus.startDepartureTime, now) <= -300;
+}
+
+function getImazatoLinerDisplayBaseTime(bus, now = new Date()) {
+    if (isImazatoLinerStartDepartureUndetected(bus, now)) {
+        return bus.predictedTime || bus.time;
+    }
+    if (bus.predictedTime) return bus.predictedTime;
+
+    return bus.time;
+}
+
+function getImazatoLinerRemovalSeconds(bus, now) {
+    if (isImazatoLinerStartDepartureUndetected(bus, now)) {
+        if (bus.predictedTime) return getSecondsUntilImazatoLiner(bus.predictedTime, now);
+        return 999999;
+    }
+
+    return getSecondsUntilImazatoLiner(getImazatoLinerDisplayBaseTime(bus, now), now);
+}
+
 function getImazatoLinerTimetableFallbackStatus(bus, cycleSeconds) {
     if (bus.timetableFlg !== true || bus.onlineFlg === true) {
         return null;
@@ -521,7 +620,7 @@ function getImazatoLinerTimetableFallbackStatus(bus, cycleSeconds) {
     return { text: "運行情報未取得", color: "#8c8f93" };
 }
 
-function getImazatoLinerRowStatus(bus) {
+function getImazatoLinerRowStatus(bus, now = new Date()) {
     const cycleSeconds = Math.floor(Date.now() / 1000) % 12;
     const fallbackStatus = getImazatoLinerTimetableFallbackStatus(
         bus,
@@ -531,6 +630,10 @@ function getImazatoLinerRowStatus(bus) {
 
     if (bus.suspensionFlg) {
         return { text: "運休", color: "#e02135" };
+    }
+
+    if (isImazatoLinerStartDepartureUndetected(bus, now)) {
+        return { text: "始発発車未検知", color: "#e02135" };
     }
 
     if (bus.lastFlg && Number(bus.delayMinutes) >= 3) {
@@ -549,9 +652,9 @@ function getImazatoLinerRowStatus(bus) {
 
     return { text: "", color: "#e02135" };
 }
-function createImazatoLinerRow(bus) {
+function createImazatoLinerRow(bus, now = new Date()) {
     const destinationInfo = getImazatoLinerDestinationInfo(bus.destination);
-    const status = getImazatoLinerRowStatus(bus);
+    const status = getImazatoLinerRowStatus(bus, now);
     const guideMode = Math.floor(Date.now() / 8000) % 3;
     const viaText = destinationInfo.via;
     const destinationText = destinationInfo.displayName || bus.destination;
@@ -586,8 +689,8 @@ function renderImazatoLinerList(elementId, buses, now) {
     const displayedRows = [];
     const displayedBuses = [];
     const sortedBuses = [...buses].sort((a, b) => {
-        const aTime = a.predictedTime || a.time;
-        const bTime = b.predictedTime || b.time;
+        const aTime = getImazatoLinerDisplayBaseTime(a, now);
+        const bTime = getImazatoLinerDisplayBaseTime(b, now);
         return (
             getSecondsUntilImazatoLiner(aTime, now) -
             getSecondsUntilImazatoLiner(bTime, now)
@@ -595,11 +698,7 @@ function renderImazatoLinerList(elementId, buses, now) {
     });
 
     for (const bus of sortedBuses) {
-        const removalTime = bus.predictedTime || bus.time;
-        const secondsUntilRemoval = getSecondsUntilImazatoLiner(
-            removalTime,
-            now,
-        );
+        const secondsUntilRemoval = getImazatoLinerRemovalSeconds(bus, now);
 
         if (secondsUntilRemoval <= 590) continue;
 
@@ -608,7 +707,7 @@ function renderImazatoLinerList(elementId, buses, now) {
                 '<div class="bus-row liner-schedule-row liner-blank-row"></div>',
             );
         } else {
-            displayedRows.push(createImazatoLinerRow(bus));
+            displayedRows.push(createImazatoLinerRow(bus, now));
         }
         displayedBuses.push(bus);
 
@@ -691,12 +790,12 @@ function getImazatoLinerGuideTargetBus(stopKey, buses, now) {
     return [...buses]
         .filter((bus) => getImazatoLinerGuideData(stopKey, bus))
         .filter((bus) => {
-            const guideTime = bus.predictedTime || bus.time;
+            const guideTime = getImazatoLinerDisplayBaseTime(bus, now);
             return getSecondsUntilImazatoLiner(guideTime, now) > 600;
         })
         .sort((a, b) => {
-            const aTime = a.predictedTime || a.time;
-            const bTime = b.predictedTime || b.time;
+            const aTime = getImazatoLinerDisplayBaseTime(a, now);
+            const bTime = getImazatoLinerDisplayBaseTime(b, now);
             return (
                 getSecondsUntilImazatoLiner(aTime, now) -
                 getSecondsUntilImazatoLiner(bTime, now)

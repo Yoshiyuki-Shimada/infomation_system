@@ -53,9 +53,55 @@ function addMinutesToOnlineTime(time, minutes) {
 
 function parseDelayEstimateMinutes(delayEstimateText) {
     const estimateMatch = normalizeOnlineText(delayEstimateText).match(
-        /約?\s*(\d+)\s*分遅れ.*発車予定/,
+        /約?\s*(\d+)\s*分遅れ.*発車(?:予定|見込み)/,
     );
     return estimateMatch ? Number(estimateMatch[1]) : 0;
+}
+
+function hasOnlineDelayEstimateNotice(delayEstimateText) {
+    return /約?\s*\d+\s*分遅れ.*発車(?:予定|見込み)/.test(
+        normalizeOnlineText(delayEstimateText),
+    );
+}
+
+function parseOnlineDepartureTime(value) {
+    const match = normalizeOnlineText(value).match(/(\d{1,2}:\d{2})\s*発?/);
+    return match?.[1] || "";
+}
+
+function parseOnlineStartDepartureTime(value) {
+    const text = normalizeOnlineText(value);
+    const plannedMatch = text.match(
+        /(?:予測|予定|見込み|発車予定)\s*(\d{1,2}:\d{2})/,
+    );
+    const timeMatches = Array.from(text.matchAll(/(\d{1,2}:\d{2})/g));
+
+    return plannedMatch?.[1] || timeMatches.at(-1)?.[1] || "";
+}
+
+function parseOnlineStartScheduledTime(value) {
+    const match = normalizeOnlineText(value).match(/定刻\s*(\d{1,2}:\d{2})/);
+    return match?.[1] || "";
+}
+
+function getOnlineMinutesOfDay(time) {
+    const normalizedTime = normalizeOnlineTime(time);
+    const match = normalizedTime.match(/^(\d{2}):(\d{2})$/);
+    if (!match) return null;
+
+    return Number(match[1]) * 60 + Number(match[2]);
+}
+
+function calculateOnlineTimeDiffMinutes(baseTime, targetTime) {
+    const baseMinutes = getOnlineMinutesOfDay(baseTime);
+    const targetMinutes = getOnlineMinutesOfDay(targetTime);
+    if (baseMinutes === null || targetMinutes === null) return 0;
+
+    let diffMinutes = targetMinutes - baseMinutes;
+    if (diffMinutes < -720) diffMinutes += 1440;
+    if (diffMinutes > 720) diffMinutes -= 1440;
+
+    return Math.max(0, diffMinutes);
 }
 function parseDelayMinutes(passInfoText, scheduledTime, predictedTime) {
     const infoMatch = normalizeOnlineText(passInfoText).match(
@@ -96,6 +142,9 @@ function parseOnlineApproachHtml(html, direction) {
             const delayEstimateText = normalizeOnlineText(
                 element.querySelector(".passTimeStartDiffText")?.textContent,
             );
+            const startDepartureText = normalizeOnlineText(
+                element.querySelector("#passTimeStartText-start")?.textContent,
+            );
             const passInfo =
                 passInfoList.find((item) =>
                     /運休|遅れ|定刻/.test(item),
@@ -114,6 +163,21 @@ function parseOnlineApproachHtml(html, direction) {
                           delayEstimateMinutes,
                       )
                     : "";
+            const startDepartureTime = normalizeOnlineTime(
+                parseOnlineStartDepartureTime(startDepartureText),
+            );
+            const startScheduledTime =
+                parseOnlineStartScheduledTime(startDepartureText) ||
+                parseOnlineDepartureTime(passTimeInfoText) ||
+                timeData.scheduledTime;
+            const startDepartureDelayMinutes = calculateOnlineTimeDiffMinutes(
+                startScheduledTime,
+                startDepartureTime,
+            );
+            const startDepartureUndetectedFlg =
+                !!startDepartureTime &&
+                /発車前/.test(allText) &&
+                !hasOnlineDelayEstimateNotice(delayEstimateText);
             const delayMinutes = timeData.predictedTime
                 ? parseDelayMinutes(
                       passInfo,
@@ -135,6 +199,9 @@ function parseOnlineApproachHtml(html, direction) {
                 delayEstimateTime: normalizeOnlineTime(estimatedTime),
                 scheduledTimeExplicit: timeData.scheduledTimeExplicit,
                 delayEstimateMinutes,
+                startDepartureTime,
+                startDepartureDelayMinutes,
+                startDepartureUndetectedFlg,
                 delayMinutes,
                 delayText:
                     delayMinutes >= 5
@@ -205,6 +272,9 @@ function parseOfficialTimetableHtml(html, direction, routeDetails = {}) {
                     predictedTime: "",
                     delayEstimateTime: "",
                     delayEstimateMinutes: 0,
+                    startDepartureTime: "",
+                    startDepartureDelayMinutes: 0,
+                    startDepartureUndetectedFlg: false,
                     delayMinutes: 0,
                     delayText: "",
                     line: routeName,
