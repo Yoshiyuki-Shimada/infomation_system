@@ -1,4 +1,4 @@
-param(
+﻿param(
     [switch]$RunOnce,
     [switch]$WakeOnce
 )
@@ -35,6 +35,19 @@ public static class DisplayPowerNativeMethods
         int dy,
         int dwData,
         UIntPtr dwExtraInfo);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct LASTINPUTINFO
+    {
+        public uint cbSize;
+        public uint dwTime;
+    }
+
+    [DllImport("user32.dll")]
+    public static extern bool GetLastInputInfo(ref LASTINPUTINFO plii);
+
+    [DllImport("kernel32.dll")]
+    public static extern ulong GetTickCount64();
 }
 "@
 
@@ -65,6 +78,43 @@ function Wake-Display {
     [DisplayPowerNativeMethods]::mouse_event(0x0001, -1, 0, 0, [UIntPtr]::Zero)
 }
 
+function Get-LastInputTime {
+    $info = [DisplayPowerNativeMethods+LASTINPUTINFO]::new()
+    $info.cbSize = [Runtime.InteropServices.Marshal]::SizeOf([DisplayPowerNativeMethods+LASTINPUTINFO])
+
+    if (-not [DisplayPowerNativeMethods]::GetLastInputInfo([ref]$info)) {
+        return $null
+    }
+
+    $tickCycle = [uint64]4294967296
+    $currentTick = [uint64]([DisplayPowerNativeMethods]::GetTickCount64() % $tickCycle)
+    $lastInputTick = [uint64]$info.dwTime
+    $elapsedMilliseconds = if ($currentTick -ge $lastInputTick) {
+        $currentTick - $lastInputTick
+    } else {
+        ($tickCycle - $lastInputTick) + $currentTick
+    }
+
+    return (Get-Date).AddMilliseconds(-1 * [double]$elapsedMilliseconds)
+}
+
+function Set-ManualDisplayAwake {
+    [IO.File]::WriteAllText($manualAwakePath, (Get-Date).ToString("o"), [Text.UTF8Encoding]::new($false))
+}
+
+function Test-DisplayWakeInput {
+    if (-not $script:MonitorIsOff -or -not $script:LastOffSignalAt) {
+        return $false
+    }
+
+    $lastInputTime = Get-LastInputTime
+    if (-not $lastInputTime) {
+        return $false
+    }
+
+    return $lastInputTime -gt $script:LastOffSignalAt.AddSeconds(1)
+}
+
 function Get-ShouldTurnDisplayOff {
     param([datetime]$Now)
 
@@ -72,11 +122,45 @@ function Get-ShouldTurnDisplayOff {
     return $minutesFromMidnight -ge 5 -and $minutesFromMidnight -lt 355
 }
 
+function Test-ManualDisplayAwake {
+    param([datetime]$Now)
+
+    if (-not (Test-Path -LiteralPath $manualAwakePath -PathType Leaf)) {
+        return $false
+    }
+
+    if (-not (Get-ShouldTurnDisplayOff -Now $Now)) {
+        Remove-Item -LiteralPath $manualAwakePath -Force -ErrorAction SilentlyContinue
+        return $false
+    }
+
+    return $true
+}
+
 function Invoke-DisplayPowerCheck {
     $now = Get-Date
     $shouldTurnOff = Get-ShouldTurnDisplayOff -Now $now
 
     if ($shouldTurnOff) {
+        if (Test-DisplayWakeInput) {
+            Set-ManualDisplayAwake
+            Wake-Display
+            $script:MonitorIsOff = $false
+            $script:LastOffSignalAt = $null
+            Write-DisplayPowerLog "manual display wake requested by touch or pointer input"
+            return
+        }
+
+        if (Test-ManualDisplayAwake -Now $now) {
+            if ($script:MonitorIsOff) {
+                Wake-Display
+                $script:MonitorIsOff = $false
+                $script:LastOffSignalAt = $null
+                Write-DisplayPowerLog "manual display wake held during quiet hours"
+            }
+            return
+        }
+
         $secondsSinceLastOff = if ($script:LastOffSignalAt) {
             ($now - $script:LastOffSignalAt).TotalSeconds
         } else {

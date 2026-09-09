@@ -549,6 +549,27 @@
     border-radius: 6px;
     border: 2px solid transparent;
 }
+.weather-warning-level {
+    margin-bottom: 8px;
+    font-size: 1.2rem;
+    font-weight: 800;
+}
+
+.weather-warning-released {
+    color: #777;
+    background: #c9c9c9;
+}
+
+.weather-warning-list-empty {
+    display: block;
+}
+
+.weather-warning-empty {
+    color: #fff;
+    font-size: 1.6rem;
+    font-weight: 700;
+    padding: 8px 0;
+}
 
 .weather-warning-special {
     color: #000;

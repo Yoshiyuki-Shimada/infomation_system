@@ -432,7 +432,7 @@ function Invoke-SystemUpdate {
 
     if ($shouldRestart) {
         Start-Sleep -Seconds 5
-        Restart-Computer -Force
+        Start-Process -FilePath "shutdown.exe" -ArgumentList "/r /t 5 /c `"infomation_system update restart`"" -WindowStyle Hidden
     }
 }
 

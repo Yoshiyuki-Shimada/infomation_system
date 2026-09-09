@@ -195,24 +195,31 @@ html {
 
 .time-block {
     width: 180px;
+    height: 100%;
     display: flex;
     flex-direction: column;
-    justify-content: center;
+    justify-content: space-between;
     align-items: flex-start;
+    padding: 1px 0;
+    box-sizing: border-box;
 }
-
 .scheduled-time {
-    font-size: 4rem;
+    font-size: 3.25rem;
     font-weight: bold;
-    line-height: 1.1;
+    line-height: 0.95;
 }
-
 .status {
-    font-size: 1.3rem;
+    font-size: 1.1rem;
     font-weight: bold;
-    height: 1.5rem;
+    height: 1.1rem;
+    line-height: 1;
+    white-space: nowrap;
 }
-
+.operation-status,
+.progress-status {
+    min-height: 1.1rem;
+    font-size: 1.3rem;
+}
 .delay-status {
     color: var(--alert-red-bg);
 }
@@ -519,9 +526,22 @@ html {
 .char-container {
     width: 120px;
     display: flex;
+    flex-direction: column;
     justify-content: center;
     align-items: center;
     margin-left: 10px;
+}
+
+.char-status {
+    width: 120px;
+    height: 1.1rem;
+    margin-top: 7.5px;
+    overflow: hidden;
+    font-size: 0.92rem;
+    font-weight: bold;
+    line-height: 1;
+    text-align: center;
+    white-space: nowrap;
 }
 .char-icon {
     width: 100px;
@@ -530,6 +550,11 @@ html {
     object-fit: cover;
     border: 2px solid var(--snow-white);
     background-color: rgba(255, 255, 255, 0.1);
+}
+
+.char-icon:not(.char-icon-status):not(.char-icon-suspension) {
+    width: 76px;
+    height: 76px;
 }
 
 .char-icon-status,
@@ -609,6 +634,10 @@ html {
     margin-bottom: 0;
 }
 
+.railway-main-body .railway-main-detail-list {
+    margin-top: 20px;
+}
+
 .jr-west-route-map {
     flex: 1;
     min-height: 0;
@@ -665,7 +694,8 @@ html {
 }
 
 .auto-scroll-content.is-scrolling {
-    animation: autoScroll var(--auto-scroll-duration, 24s) linear var(--auto-scroll-delay, 0s) forwards;
+    animation: autoScroll var(--auto-scroll-duration, 24s) linear
+        var(--auto-scroll-delay, 0s) forwards;
 }
 
 @keyframes autoScroll {
@@ -714,7 +744,8 @@ html {
     align-items: center;
     flex: 0 0 auto;
     will-change: transform;
-    animation: transfer-guide-scroll var(--transfer-guide-duration, 42s) linear infinite;
+    animation: transfer-guide-scroll var(--transfer-guide-duration, 42s) linear
+        infinite;
 }
 
 .transfer-guide-item,

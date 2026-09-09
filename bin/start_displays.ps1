@@ -1,4 +1,4 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type @"
@@ -14,6 +14,16 @@ public static class InfomationSystemTaskbar {
 }
 "@
 
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class InfomationSystemStartupTap {
+    [DllImport("user32.dll")]
+    public static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")]
+    public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extraInfo);
+}
+"@
 function Hide-WindowsTaskbar {
     $hide = 0
     $primary = [InfomationSystemTaskbar]::FindWindow("Shell_TrayWnd", $null)
@@ -114,6 +124,16 @@ function Start-KioskWindow {
 
 Hide-WindowsTaskbar
 
+function Invoke-StartupTap {
+    param([System.Windows.Forms.Screen]$Screen)
+
+    Start-Sleep -Seconds 3
+    $x = $Screen.Bounds.X + 2
+    $y = $Screen.Bounds.Y + 2
+    [void][InfomationSystemStartupTap]::SetCursorPos($x, $y)
+    [InfomationSystemStartupTap]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+    [InfomationSystemStartupTap]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+}
 # テレビ/外部画面: メイン画面 index.html
 Start-KioskWindow `
     -PagePath (Join-Path $projectDir "index.html") `
@@ -127,3 +147,5 @@ Start-KioskWindow `
     -PagePath (Join-Path $projectDir "imazato-liner.html") `
     -Screen $pcScreen `
     -ProfilePath $linerProfile
+
+Invoke-StartupTap -Screen $pcScreen

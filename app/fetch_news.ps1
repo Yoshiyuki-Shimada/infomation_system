@@ -12,7 +12,7 @@ $ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like
 # Yahoo!運行情報の路線ID
 $privateLineIds = @(
     "320", "321", "322", "323", "324", "325", "326", "327", "537",   #Osaka Metro線
-    "284", "285", "287", "295" #近鉄線
+    "284", "285", "287", "295", #近鉄線
     "339", "340", "347", #南海線
     "306", "310", "311", "313", #阪急線
     "300", #京阪線
@@ -264,11 +264,7 @@ while ($true) {
                 foreach ($kind in @($item.kinds)) {
                     $status = [string]$kind.status
                     $code = [string]$kind.code
-                    if (
-                        [string]::IsNullOrWhiteSpace($code) -or
-                        $status -eq "解除" -or
-                        $status -match "発表警報・注意報はなし"
-                    ) {
+                    if ([string]::IsNullOrWhiteSpace($code)) {
                         continue
                     }
 
@@ -286,13 +282,14 @@ while ($true) {
         }
         $osakaCityWarnings = @($osakaCityWarningsByCode.Values)
 
+        $data.weatherWarnings = @{
+            reportDatetime = $warningReportDatetime
+            areaName = "大阪市"
+            warnings = $osakaCityWarnings
+        }
+
         if ($osakaCityWarnings.Count -gt 0) {
-            $data.weatherWarnings = @{
-                reportDatetime = $warningReportDatetime
-                areaName = "大阪市"
-                warnings = $osakaCityWarnings
-            }
-            Write-Host " 気象警報・注意報：大阪市に発表中の情報あり" -ForegroundColor Yellow
+            Write-Host " 気象警報・注意報：大阪市の更新情報あり" -ForegroundColor Yellow
         }
         else {
             Write-Host " 気象警報・注意報：大阪市は発表なし" -ForegroundColor Green
@@ -373,6 +370,8 @@ while ($true) {
                 [string]$Detail.supplementary
             ) -join " "
 
+            if ($text -match "運転取り止めの可能性|運転取止めの可能性|取り止めの可能性|取止めの可能性") { return "orange" }
+            if ($text -match "一部列車遅延・運休|一部列車運休・遅延|一部列車運休|一部列車に運休|部分運休") { return "yellow" }
             if ($text -match "見合わせ|取り止め|運休|運転休止") { return "red" }
             if ($SectionSeverity -ge 3) { return "red" }
             if ($text -match "お知らせ|可能性|行き先変更|変更") { return "orange" }
@@ -400,6 +399,124 @@ while ($true) {
             $targets = @("こうのとり", "はまかぜ", "きのさき", "はしだて", "まいづる")
             $searchText = Get-JRWestDetailSearchText -Line $Line -Detail $Detail
             return @($targets | Where-Object { $searchText -match [regex]::Escape($_) })
+        }
+
+        function Get-JRWestPropertyValue {
+            param(
+                $Source,
+                [string]$PropertyName
+            )
+
+            if (-not $Source) { return $null }
+            $property = $Source.PSObject.Properties[$PropertyName]
+            if (-not $property) { return $null }
+            return $property.Value
+        }
+
+        function Get-JRWestDirectionInfoLines {
+            param($DirectionInfo)
+
+            if (-not $DirectionInfo) { return @() }
+
+            $direction = ([string](Get-JRWestPropertyValue `
+                -Source $DirectionInfo `
+                -PropertyName "direction")).Trim()
+            $trainInfo = ([string](Get-JRWestPropertyValue `
+                -Source $DirectionInfo `
+                -PropertyName "trainInfo")).Trim()
+            if ([string]::IsNullOrWhiteSpace($direction) -and
+                [string]::IsNullOrWhiteSpace($trainInfo)) {
+                return @()
+            }
+
+            $lines = @()
+            if (-not [string]::IsNullOrWhiteSpace($direction)) { $lines += $direction }
+            if (-not [string]::IsNullOrWhiteSpace($trainInfo)) { $lines += $trainInfo }
+            return $lines
+        }
+
+        function Get-JRWestDirectionInfo {
+            param(
+                $Detail,
+                $LatestDetail,
+                [string]$PropertyName
+            )
+
+            $latestDirectionInfo = Get-JRWestPropertyValue `
+                -Source $LatestDetail `
+                -PropertyName $PropertyName
+            if ($latestDirectionInfo) { return $latestDirectionInfo }
+
+            return Get-JRWestPropertyValue `
+                -Source $Detail `
+                -PropertyName $PropertyName
+        }
+
+        function Get-JRWestLimitedExpressTargetTrainText {
+            param(
+                $Detail,
+                $LatestDetail
+            )
+
+            $blocks = New-Object System.Collections.ArrayList
+            foreach ($propertyName in @("directionDown", "directionUp")) {
+                $directionInfo = Get-JRWestDirectionInfo `
+                    -Detail $Detail `
+                    -LatestDetail $LatestDetail `
+                    -PropertyName $propertyName
+                $lines = @(Get-JRWestDirectionInfoLines -DirectionInfo $directionInfo)
+                if ($lines.Count -gt 0) { [void]$blocks.Add(($lines -join "`n")) }
+            }
+
+            $uniqueBlocks = @($blocks | Select-Object -Unique)
+            if ($uniqueBlocks.Count -eq 0) { return "" }
+            return "対象列車`n$($uniqueBlocks -join "`n")"
+        }
+        function Get-JRWestShinkansenStationOrderIndex {
+            param([string]$StationName)
+
+            $stations = @(
+                "博多", "小倉", "新下関", "厚狭", "新山口", "徳山", "新岩国", "広島",
+                "東広島", "三原", "新尾道", "福山", "新倉敷", "岡山", "相生", "姫路",
+                "西明石", "新神戸", "新大阪", "京都", "米原", "岐阜羽島", "名古屋", "三河安城",
+                "豊橋", "浜松", "掛川", "静岡", "新富士", "三島", "熱海", "小田原",
+                "新横浜", "品川", "東京"
+            )
+            $normalizedStationName = ([string]$StationName).Trim()
+
+            for ($i = 0; $i -lt $stations.Count; $i++) {
+                if ($stations[$i] -eq $normalizedStationName) { return $i }
+            }
+
+            return -1
+        }
+
+        function Get-JRWestDirectedShinkansenStations {
+            param(
+                [string]$StartStation,
+                [string]$EndStation,
+                [string]$Direction
+            )
+
+            if ([string]::IsNullOrWhiteSpace($StartStation) -or [string]::IsNullOrWhiteSpace($EndStation)) {
+                return @($StartStation, $EndStation)
+            }
+
+            $startIndex = Get-JRWestShinkansenStationOrderIndex -StationName $StartStation
+            $endIndex = Get-JRWestShinkansenStationOrderIndex -StationName $EndStation
+            if ($startIndex -lt 0 -or $endIndex -lt 0) {
+                return @($StartStation, $EndStation)
+            }
+
+            if ($Direction -match "上り" -and $startIndex -gt $endIndex) {
+                return @($EndStation, $StartStation)
+            }
+
+            if ($Direction -match "下り" -and $startIndex -lt $endIndex) {
+                return @($EndStation, $StartStation)
+            }
+
+            return @($StartStation, $EndStation)
         }
 
         function Add-JRWestTrafficInfoEntry {
@@ -430,14 +547,26 @@ while ($true) {
                     $sectionPrefix = if ($isSanyoShinkansen -or [string]::IsNullOrWhiteSpace($sectionDirection)) { "" } else { "[$sectionDirection] " }
                     $sectionSeparator = if ($isSingleDirection) { "　→　" } else { "　～　" }
 
-                    if ($sec.endStation -eq "" -or $null -eq $sec.endStation) {
-                        $secList += "$sectionPrefix$($sec.startStation)（$sectionCondition）"
-                    }
-                    else {
-                        $secList += "$sectionPrefix$($sec.startStation)$sectionSeparator$($sec.endStation)（$sectionCondition）"
+                    $sectionStartStation = [string]$sec.startStation
+                    $sectionEndStation = [string]$sec.endStation
+                    if ($isSingleDirection) {
+                        $directedStations = @(Get-JRWestDirectedShinkansenStations `
+                            -StartStation $sectionStartStation `
+                            -EndStation $sectionEndStation `
+                            -Direction $sectionDirection)
+                        $sectionStartStation = [string]$directedStations[0]
+                        $sectionEndStation = [string]$directedStations[1]
                     }
 
-                    if ($sectionCondition -match "見合わせ|取り止め|運休|運転休止") { $maxSev = 3 }
+                    if ([string]::IsNullOrWhiteSpace($sectionEndStation)) {
+                        $secList += "$sectionPrefix$sectionStartStation（$sectionCondition）"
+                    }
+                    else {
+                        $secList += "$sectionPrefix$sectionStartStation$sectionSeparator$sectionEndStation（$sectionCondition）"
+                    }
+
+                    if ($sectionCondition -match "運転取り止めの可能性|運転取止めの可能性|取り止めの可能性|取止めの可能性") { $maxSev = [Math]::Max($maxSev, 2) }
+                    elseif ($sectionCondition -match "見合わせ|取り止め|運休|運転休止") { $maxSev = 3 }
                     elseif ($sectionCondition -match "お知らせ|可能性|行き先変更|変更") { $maxSev = [Math]::Max($maxSev, 2) }
                 }
             }
@@ -451,6 +580,20 @@ while ($true) {
             $latestDetail = Get-JRWestLatestVersionDetail -Detail $Detail
             $title = if ($latestDetail) { [string]$latestDetail.title } else { "" }
             $body = if ($latestDetail) { [string]$latestDetail.body } else { "" }
+            $isLimitedExpress = $DisplayName -match "^特急"
+            if ($isLimitedExpress) {
+                $targetTrainText = Get-JRWestLimitedExpressTargetTrainText `
+                    -Detail $Detail `
+                    -LatestDetail $latestDetail
+                if (-not [string]::IsNullOrWhiteSpace($targetTrainText)) {
+                    $body = if ([string]::IsNullOrWhiteSpace($body)) {
+                        $targetTrainText
+                    }
+                    else {
+                        "$($body.Trim())`n`n$targetTrainText"
+                    }
+                }
+            }
 
             $msg = ($secList -join " / ")
             if ($Detail.cause) { $msg += " 【原因】$($Detail.cause)" }
@@ -470,6 +613,7 @@ while ($true) {
                 title = $title;
                 body = $body;
                 lineCode = 0;
+                limitedExpress = $isLimitedExpress;
             })
             Write-Host "  -> [JR] $DisplayName ($color) を採用" -ForegroundColor Green
         }
@@ -515,6 +659,59 @@ while ($true) {
                 }
             }
         }
+        function Get-JRWestKinkiNoEffectDisplayName {
+            param($Place)
+
+            switch ([int]$Place.id) {
+                1 { return "JR近畿エリア（京阪神）" }
+                3 { return "JR近畿エリア（和歌山）" }
+                4 { return "JR近畿エリア（北近畿）" }
+                default { return "" }
+            }
+        }
+
+        function Add-JRWestNoEffectTrafficInfos {
+            param(
+                [System.Collections.IList]$Results,
+                [hashtable]$SeenKeys,
+                $Place
+            )
+
+            $displayName = Get-JRWestKinkiNoEffectDisplayName -Place $Place
+            if ([string]::IsNullOrWhiteSpace($displayName)) { return }
+            if (-not $Place.noEffectLineTrafficInfos) { return }
+
+            foreach ($detail in @($Place.noEffectLineTrafficInfos)) {
+                if (-not $detail) { continue }
+
+                $latestDetail = Get-JRWestLatestVersionDetail -Detail $detail
+                $title = if ($latestDetail) { [string]$latestDetail.title } else { [string]$detail.supplementary }
+                $body = if ($latestDetail) { [string]$latestDetail.body } else { "" }
+                $msgParts = @()
+                if (-not [string]::IsNullOrWhiteSpace([string]$detail.supplementary)) { $msgParts += [string]$detail.supplementary }
+                if (-not [string]::IsNullOrWhiteSpace([string]$detail.cause)) { $msgParts += "【原因】$($detail.cause)" }
+                $msg = ($msgParts -join " ").Trim()
+                if ([string]::IsNullOrWhiteSpace($msg)) { $msg = $title }
+                if ([string]::IsNullOrWhiteSpace($title)) { $title = "お知らせ" }
+                if ([string]::IsNullOrWhiteSpace($body)) { $body = $msg }
+
+                $seenKey = "$displayName|$title|$msg|$body|noEffect"
+                if ($SeenKeys.ContainsKey($seenKey)) { continue }
+                $SeenKeys[$seenKey] = $true
+
+                [void]$Results.Add(@{
+                    company = "JR西日本";
+                    name = $displayName;
+                    msg = $msg;
+                    color = "orange";
+                    title = $title;
+                    body = $body;
+                    lineCode = 1;
+                    limitedExpress = $false;
+                })
+                Write-Host "  -> [JR] $displayName noEffect ($title) を採用" -ForegroundColor Green
+            }
+        }
 
         # JR西日本 取得関数
         function Get-JRWestTrafficInfoData {
@@ -528,13 +725,17 @@ while ($true) {
 
                 foreach ($daily in $area.dailyData) {
                     foreach ($place in $daily.placeTrafficInfos) {
-                        # 近畿エリア(ID:2)の在来線
+                        # 近畿エリア(ID:2)の在来線と、影響区間なしのお知らせ情報
                         if ($area.id -eq 2) {
                             Add-JRWestLineTrafficInfos `
                                 -Results $results `
                                 -SeenKeys $seenKeys `
                                 -Lines $place.conventionalLineTrafficInfos `
                                 -DetailPropertyName "conventionalLineTrafficInfoDetails"
+                            Add-JRWestNoEffectTrafficInfos `
+                                -Results $results `
+                                -SeenKeys $seenKeys `
+                                -Place $place
                         }
 
                         # 山陽新幹線はYahoo!ではなくJR西日本公式APIから取得する。
@@ -986,3 +1187,4 @@ while ($true) {
     # 5分ごとの情報取得
     Start-Sleep -Seconds 300
 }
+

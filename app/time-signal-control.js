@@ -1,4 +1,4 @@
-(() => {
+﻿(() => {
     const apiBase = "http://127.0.0.1:18765/time-signal";
     const button = document.getElementById("time-signal-toggle");
     const menu = document.getElementById("time-signal-menu");
@@ -10,6 +10,7 @@
     let paused = false;
     let disabled = false;
     let actionRunning = false;
+    let intervalMinutes = 30;
     let autoCloseTimer = null;
 
     const quietControlResumeMinutes = 355;
@@ -35,15 +36,14 @@
         return `${date.getHours()}:${String(date.getMinutes()).padStart(2, "0")}\uff5e`;
     }
 
-    function getNextSignalTime(now = new Date()) {
+    function getNextSignalTime(now = new Date(), interval = intervalMinutes) {
         const next = new Date(now);
         next.setSeconds(0, 0);
-        const remainder = next.getMinutes() % 10;
-        const addMinutes = remainder === 0 ? 10 : 10 - remainder;
+        const remainder = next.getMinutes() % interval;
+        const addMinutes = remainder === 0 ? interval : interval - remainder;
         next.setMinutes(next.getMinutes() + addMinutes);
         return next;
     }
-
     function getNextHalfHourAfter(date) {
         const next = new Date(date);
         next.setSeconds(0, 0);
@@ -69,15 +69,15 @@
     }
 
     function getResumeOptions(now = new Date()) {
-        const base = getNextSignalTime(now);
-        const firstOptions = [10, 20, 30, 40, 50, 60].map((minutes) => addMinutes(base, minutes));
-        const anchor = getNextHalfHourAfter(firstOptions[firstOptions.length - 1]);
-        const anchorOptions = [0, 30, 60, 90, 120].map((minutes) => addMinutes(anchor, minutes));
+        const base = getNextSignalTime(now, intervalMinutes);
+        const offsets = intervalMinutes === 10
+            ? [10, 20, 30, 40, 50, 60, 90, 120, 150, 180, 210, 240]
+            : [30, 60, 90, 120, 150, 180, 210, 240, 270];
         const uniqueOptions = [];
         const seenUntilMs = new Set();
 
-        firstOptions.concat(anchorOptions).forEach((date) => {
-            const normalizedDate = normalizeResumeOptionDate(date);
+        offsets.forEach((offset) => {
+            const normalizedDate = normalizeResumeOptionDate(addMinutes(base, offset));
             const untilMs = normalizedDate.getTime();
             if (seenUntilMs.has(untilMs)) return;
 
@@ -90,7 +90,6 @@
 
         return uniqueOptions;
     }
-
     async function callApi(path) {
         const response = await fetch(`${apiBase}${path}`, { cache: "no-store" });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -140,20 +139,23 @@
     function renderStatus(status) {
         disabled = Boolean(status.disabled) || isQuietHours();
         paused = Boolean(status.paused) && !disabled;
+        intervalMinutes = Number(status.intervalMinutes) === 10 ? 10 : 30;
         actionRunning = false;
         closeMenu();
         button.disabled = disabled;
-        button.textContent = paused ? "\u6642\u5831\u518d\u958b" : "\u6642\u5831\u505c\u6b62";
+        button.textContent = "時報設定";
         document.body.classList.toggle("time-signal-paused", paused);
+        document.body.classList.toggle("time-signal-disabled", disabled);
 
         if (disabled) {
-            statusElement.textContent = "0:00\u301c5:55\u306f\u64cd\u4f5c\u3067\u304d\u307e\u305b\u3093";
+            statusElement.textContent = "0:00～5:55は操作できません";
             return;
         }
 
-        statusElement.textContent = paused ? formatUntil(status.until) : "\u6642\u5831\u306f\u901a\u5e38\u3069\u304a\u308a\u9cf4\u308a\u307e\u3059";
+        statusElement.textContent = paused
+            ? formatUntil(status.until)
+            : `時報有効　${intervalMinutes}分間隔で鳴ります。`;
     }
-
     async function refreshStatus() {
         try {
             const status = await callApi("/status");
@@ -194,6 +196,21 @@
         pauseUntil(option, optionButton);
     }
 
+    async function setIntervalMinutes(nextInterval, optionButton) {
+        if (actionRunning || disabled) return;
+
+        actionRunning = true;
+        optionButton.disabled = true;
+        try {
+            const status = await callApi(`/interval?minutes=${nextInterval}`);
+            renderStatus(status);
+        } catch {
+            actionRunning = false;
+            optionButton.disabled = false;
+            statusElement.textContent = "時報間隔を設定できませんでした";
+        }
+    }
+
     function buildMenu() {
         menu.innerHTML = "";
 
@@ -202,26 +219,57 @@
 
         const title = document.createElement("div");
         title.className = "time-signal-menu-title";
-        title.textContent = "\u6642\u5831\u518d\u958b\u6642\u523b\u3092\u9078\u629e";
+        title.textContent = "時報設定";
         dialog.appendChild(title);
 
+        const intervalSection = document.createElement("section");
+        intervalSection.className = "time-signal-menu-section";
+        const intervalTitle = document.createElement("div");
+        intervalTitle.className = "time-signal-menu-section-title";
+        intervalTitle.textContent = "時報間隔";
+        intervalSection.appendChild(intervalTitle);
+
+        const intervalList = document.createElement("div");
+        intervalList.className = "time-signal-option-list time-signal-interval-list";
+        [30, 10].forEach((value) => {
+            const optionButton = document.createElement("button");
+            optionButton.type = "button";
+            optionButton.className = "time-signal-option";
+            if (value === intervalMinutes) optionButton.classList.add("selected");
+            optionButton.textContent = `${value}分間隔`;
+            optionButton.addEventListener("pointerdown", (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                resetAutoCloseTimer();
+                setIntervalMinutes(value, optionButton);
+            });
+            intervalList.appendChild(optionButton);
+        });
+        intervalSection.appendChild(intervalList);
+        dialog.appendChild(intervalSection);
+
+        const pauseSection = document.createElement("section");
+        pauseSection.className = "time-signal-menu-section";
+        const pauseTitle = document.createElement("div");
+        pauseTitle.className = "time-signal-menu-section-title";
+        pauseTitle.textContent = "時報停止（再開時刻）";
+        pauseSection.appendChild(pauseTitle);
         const optionList = document.createElement("div");
         optionList.className = "time-signal-option-list";
-
         getResumeOptions().forEach((option) => {
             const optionButton = document.createElement("button");
             optionButton.type = "button";
             optionButton.className = "time-signal-option";
             optionButton.textContent = option.label;
+            optionButton.disabled = paused;
             optionButton.addEventListener("pointerdown", (event) => handleOptionPress(event, option, optionButton));
-            optionButton.addEventListener("click", (event) => handleOptionPress(event, option, optionButton));
             optionList.appendChild(optionButton);
         });
+        pauseSection.appendChild(optionList);
+        dialog.appendChild(pauseSection);
 
-        dialog.appendChild(optionList);
         menu.appendChild(dialog);
     }
-
     function openMenu() {
         buildMenu();
         menu.hidden = false;

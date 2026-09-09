@@ -76,17 +76,28 @@
 
 .liner-time-block {
     width: 150px;
+    height: 100%;
     flex: 0 0 150px;
+    justify-content: center;
+    box-sizing: border-box;
 }
-
 .liner-scheduled-time {
-    font-size: 3.35rem;
+    font-size: 3rem;
+    line-height: 0.95;
+}
+.liner-operation-status {
+    display: block;
+    height: 1.1rem;
+    margin-bottom: 0;
+    font-size: 1.05rem;
+    line-height: 1;
 }
 
 .liner-row-status {
-    height: 1.25rem;
+    height: 1.1rem;
+    margin-top: 0;
     font-size: 1.05rem;
-    line-height: 1.15;
+    line-height: 1;
     color: var(--alert-red-bg);
 }
 
@@ -214,6 +225,11 @@
     cursor: not-allowed;
 }
 
+.time-signal-paused .time-signal-toggle {
+    border-color: var(--alert-red-bg);
+    background: var(--alert-red-bg);
+    color: #fff;
+}
 .time-signal-paused .time-signal-toggle:not(:disabled) {
     border-color: var(--alert-red-bg);
     background: var(--alert-red-bg);
@@ -277,6 +293,28 @@
     text-align: center;
 }
 
+.time-signal-menu-section {
+    margin-top: 12px;
+}
+
+.time-signal-menu-section-title {
+    margin-bottom: 8px;
+    color: var(--sky-blue);
+    font-size: 1.05rem;
+    font-weight: 900;
+}
+
+.time-signal-interval-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    max-height: none;
+}
+
+.time-signal-option.selected {
+    background: var(--sky-blue);
+    border-color: var(--sky-blue);
+    color: #000;
+}
+
 .time-signal-option-list {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -299,6 +337,12 @@
     touch-action: manipulation;
 }
 
+.time-signal-option:disabled {
+    border-color: #555;
+    background: #333;
+    color: #888;
+    cursor: not-allowed;
+}
 .time-signal-option:active,
 .time-signal-option:hover,
 .time-signal-option:focus-visible {
@@ -312,7 +356,7 @@
     }
 
     .time-signal-toggle,
-.display-power-off-toggle {
+    .display-power-off-toggle {
         font-size: 1.02rem;
     }
 
@@ -333,7 +377,7 @@
         font-size: 1.18rem;
     }
 
-    .time-signal-option-list {
+.time-signal-option-list {
         gap: 10px;
         max-height: calc(100vh - 150px);
     }
@@ -343,4 +387,911 @@
         font-size: 1.2rem;
         padding: 12px 8px;
     }
+}
+
+.time-signal-control-inner {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.system-control-spacer {
+    flex: 1 1 auto;
+}
+
+.network-status-toggle,
+.system-restart-toggle {
+    width: 100%;
+    min-height: 48px;
+    border: 2px solid var(--sky-blue);
+    background: #102940;
+    color: var(--snow-white);
+    font-size: 1.02rem;
+    font-weight: 900;
+    cursor: pointer;
+    touch-action: manipulation;
+}
+
+.network-status-toggle {
+    margin-top: 10px;
+    line-height: 1.25;
+}
+
+.system-restart-toggle {
+    margin-top: 10px;
+}
+
+.network-status-toggle:active,
+.network-status-toggle:hover,
+.network-status-toggle:focus-visible,
+.system-restart-toggle:active,
+.system-restart-toggle:hover,
+.system-restart-toggle:focus-visible {
+    background: #174568;
+    border-color: var(--sky-yellow);
+}
+
+.network-dashboard-modal[hidden],
+.restart-confirm-modal[hidden] {
+    display: none !important;
+}
+
+.network-dashboard-modal,
+.restart-confirm-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 1200;
+    color: var(--snow-white);
+    font-weight: 800;
+}
+
+.network-modal-backdrop,
+.restart-modal-backdrop,
+.network-error-detail-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.62);
+}
+
+.network-modal-dialog {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: min(1200px, calc(100vw - 90px));
+    height: min(620px, calc(100vh - 70px));
+    box-sizing: border-box;
+    border: 3px solid var(--sky-blue);
+    background: #062563;
+    box-shadow: 0 18px 54px rgba(0, 0, 0, 0.7);
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.network-modal-title {
+    flex: 0 0 auto;
+    color: var(--sky-yellow);
+    font-size: 1.15rem;
+    line-height: 1.25;
+    text-align: center;
+}
+
+.network-modal-header-row {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+    margin: 8px 0;
+}
+
+.network-dashboard-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--mint-green);
+    font-size: 1.35rem;
+}
+
+.network-dashboard-status span,
+.network-quality span {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: currentColor;
+    display: inline-block;
+}
+
+.network-dashboard-status.is-offline,
+.network-dashboard-status.is-error {
+    color: var(--alert-red-bg);
+}
+
+.network-last-updated {
+    color: var(--snow-white);
+    font-size: 1rem;
+}
+
+.network-summary-grid {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(280px, 0.85fr);
+    border: 2px solid var(--snow-white);
+    overflow: hidden;
+}
+
+.network-summary-card {
+    min-width: 0;
+    padding: 10px 12px;
+    border-right: 2px solid var(--snow-white);
+    overflow: hidden;
+}
+
+.network-summary-card:last-child {
+    border-right: 0;
+}
+
+.network-summary-card h3 {
+    margin: 0 0 6px;
+    font-size: 1.08rem;
+    line-height: 1.25;
+}
+
+.network-address {
+    margin-bottom: 12px;
+    font-size: 1rem;
+}
+
+.network-quality {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 34px;
+    font-size: 1rem;
+}
+
+.network-quality.normal {
+    color: var(--mint-green);
+}
+
+.network-quality.warning {
+    color: var(--imazato-orange);
+}
+
+.network-quality.danger {
+    color: var(--alert-red-bg);
+}
+
+.network-summary-section-title {
+    margin: 14px 0 8px;
+    padding-left: 10px;
+    border-left: 8px solid var(--mint-green);
+    color: var(--mint-green);
+    font-size: 1rem;
+}
+
+.network-summary-metrics {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 4px 16px;
+    margin: 0 0 22px;
+    font-size: 1rem;
+}
+
+.network-summary-metrics dt,
+.network-summary-metrics dd {
+    margin: 0;
+}
+
+.network-summary-metrics dd {
+    text-align: right;
+}
+
+.network-data-update-item {
+    margin-bottom: 18px;
+    font-size: 0.95rem;
+}
+
+.network-data-update-item dl {
+    display: grid;
+    grid-template-columns: 90px minmax(0, 1fr);
+    gap: 2px 10px;
+    margin: 5px 0 0 16px;
+}
+
+.network-data-update-item dt,
+.network-data-update-item dd {
+    margin: 0;
+}
+
+.network-card-detail {
+    margin-top: auto;
+    min-width: 110px;
+    min-height: 42px;
+    border: 2px solid var(--sky-blue);
+    background: #063a79;
+    color: var(--snow-white);
+    font-size: 1rem;
+    font-weight: 900;
+}
+
+.network-detail-dialog {
+    height: min(620px, calc(100vh - 46px));
+}
+
+.network-detail-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    border: 2px solid var(--snow-white);
+}
+
+.network-tab,
+.network-filter,
+.network-range,
+.network-sort {
+    min-height: 32px;
+    border: 2px solid var(--sky-blue);
+    background: #062563;
+    color: var(--snow-white);
+    font-size: 0.9rem;
+    font-weight: 900;
+}
+
+.network-tab {
+    border: 0;
+    border-right: 2px solid var(--snow-white);
+}
+
+.network-tab:last-child {
+    border-right: 0;
+}
+
+.network-tab.is-active,
+.network-filter.is-active,
+.network-range.is-active,
+.network-sort.is-active {
+    background: var(--sky-yellow);
+    color: #000;
+}
+
+.network-detail-info {
+    display: flex;
+    gap: 28px;
+    margin: 8px 0;
+    font-size: 0.95rem;
+}
+
+.network-detail-controls {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-bottom: 6px;
+}
+
+.network-detail-controls > div {
+    display: flex;
+    gap: 4px;
+}
+
+.network-history-table-wrap {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    border-top: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.network-history-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+}
+
+.network-history-table th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: #0879bd;
+    color: var(--snow-white);
+}
+
+.network-history-table th,
+.network-history-table td {
+    padding: 7px 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.22);
+    white-space: nowrap;
+    text-align: center;
+}
+
+.network-history-table tr.has-error td {
+    color: #ffd7df;
+}
+
+.network-empty-row {
+    height: 90px;
+    color: var(--snow-gray-text);
+}
+
+.network-detail-button {
+    min-width: 54px;
+    min-height: 30px;
+    border: 0;
+    background: transparent;
+    color: var(--snow-white);
+    font-weight: 900;
+}
+
+.network-modal-actions {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 8px;
+}
+
+.network-secondary-button,
+.network-back-button {
+    min-width: 120px;
+    min-height: 44px;
+    border: 2px solid var(--sky-blue);
+    background: #063a79;
+    color: var(--snow-white);
+    font-size: 1rem;
+    font-weight: 900;
+}
+
+.network-secondary-button {
+    margin-left: auto;
+    background: #ec55c1;
+    border-color: #ec55c1;
+}
+
+.network-error-detail-dialog {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: min(550px, calc(100vw - 140px));
+    max-height: min(360px, calc(100vh - 130px));
+    box-sizing: border-box;
+    padding: 12px;
+    border: 3px solid var(--sky-blue);
+    background: #062563;
+    z-index: 2;
+    overflow: hidden;
+}
+
+.network-error-detail-title {
+    margin-top: 14px;
+}
+
+.network-error-detail-dialog pre {
+    height: 210px;
+    max-height: calc(100vh - 260px);
+    margin: 4px 0 0;
+    padding: 10px;
+    overflow: auto;
+    background: #000;
+    color: var(--snow-white);
+    white-space: pre-wrap;
+    font-family: Consolas, monospace;
+    font-size: 0.88rem;
+}
+
+.restart-modal-dialog {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: min(460px, calc(100vw - 80px));
+    box-sizing: border-box;
+    padding: 22px;
+    border: 3px solid var(--sky-blue);
+    background: #062563;
+    text-align: center;
+}
+
+.restart-modal-title {
+    color: var(--sky-yellow);
+    font-size: 1.4rem;
+    margin-bottom: 14px;
+}
+
+.restart-modal-text {
+    font-size: 1rem;
+    margin-bottom: 20px;
+}
+
+.restart-modal-actions {
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+}
+
+.restart-yes-button,
+.restart-no-button {
+    min-width: 130px;
+    min-height: 54px;
+    border: 2px solid var(--sky-blue);
+    font-size: 1.15rem;
+    font-weight: 900;
+}
+
+.restart-yes-button {
+    background: var(--alert-red-bg);
+    color: var(--snow-white);
+}
+
+.restart-no-button {
+    background: #063a79;
+    color: var(--snow-white);
+}
+
+@media (max-width: 1400px) {
+    .network-status-toggle,
+    .system-restart-toggle {
+        min-height: 42px;
+        font-size: 0.9rem;
+    }
+
+    .network-modal-dialog {
+        width: min(1120px, calc(100vw - 60px));
+        height: min(610px, calc(100vh - 42px));
+    }
+
+    .network-summary-grid {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(
+                250px,
+                0.9fr
+            );
+    }
+
+    .network-history-table {
+        font-size: 0.8rem;
+    }
+
+    .network-history-table th,
+    .network-history-table td {
+        padding: 6px;
+    }
+}
+
+/* 通信状況ダッシュボード：一覧・日時指定改修 */
+.network-modal-dialog {
+    width: min(1290px, calc(100vw - 34px));
+    height: min(690px, calc(100vh - 34px));
+    padding: 12px;
+}
+
+.network-summary-card {
+    display: flex;
+    flex-direction: column;
+}
+
+.network-detail-dialog {
+    height: min(690px, calc(100vh - 34px));
+}
+
+.network-detail-info {
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px 28px;
+}
+
+.network-detail-controls {
+    align-items: center;
+    justify-content: center;
+}
+
+.network-tab,
+.network-filter,
+.network-range,
+.network-sort {
+    min-height: 36px;
+    padding: 0 12px;
+    touch-action: manipulation;
+}
+
+.network-history-table-wrap {
+    flex: 1 1 auto;
+    min-height: 180px;
+}
+
+.network-history-table tr.is-selected td {
+    background: rgba(255, 231, 102, 0.18);
+}
+
+.network-detail-button {
+    min-width: 58px;
+    min-height: 30px;
+    border: 2px solid var(--sky-blue);
+    background: #063a79;
+    color: var(--snow-white);
+    font-weight: 900;
+    touch-action: manipulation;
+}
+
+.network-inline-detail-panel {
+    flex: 0 0 150px;
+    margin-top: 8px;
+    padding: 10px;
+    border: 2px solid var(--sky-blue);
+    background: #062563;
+    overflow: hidden;
+}
+
+.network-inline-detail-empty {
+    display: flex;
+    align-items: center;
+    height: 100%;
+    color: var(--snow-gray-text);
+    font-size: 0.95rem;
+}
+
+.network-inline-detail-grid {
+    display: grid;
+    grid-template-columns:
+        minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr)
+        minmax(0, 1fr);
+    gap: 8px 18px;
+    margin-bottom: 6px;
+    font-size: 0.95rem;
+}
+
+.network-inline-detail-panel .network-error-detail-title {
+    margin: 0 0 4px;
+    color: var(--snow-white);
+    font-size: 0.9rem;
+}
+
+.network-inline-detail-panel pre {
+    height: 78px;
+    margin: 0;
+    padding: 8px;
+    overflow: auto;
+    background: #000;
+    color: var(--snow-white);
+    white-space: pre-wrap;
+    word-break: break-word;
+    font:
+        0.9rem/1.35 Consolas,
+        "Yu Gothic",
+        monospace;
+}
+
+.network-date-modal-backdrop {
+    position: absolute;
+    inset: 0;
+    z-index: 1250;
+    background: rgba(0, 0, 0, 0.55);
+}
+
+.network-date-modal-dialog {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    z-index: 1251;
+    transform: translate(-50%, -50%);
+    width: min(560px, calc(100vw - 120px));
+    box-sizing: border-box;
+    padding: 22px;
+    border: 3px solid var(--sky-blue);
+    background: #062563;
+    box-shadow: 0 18px 54px rgba(0, 0, 0, 0.75);
+}
+
+.network-date-modal-title {
+    margin-bottom: 18px;
+    color: var(--sky-yellow);
+    font-size: 1.25rem;
+    text-align: center;
+}
+
+.network-date-modal-dialog label {
+    display: grid;
+    grid-template-columns: 110px minmax(0, 1fr);
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 16px;
+    font-size: 1rem;
+}
+
+.network-date-modal-dialog input {
+    min-height: 48px;
+    box-sizing: border-box;
+    padding: 6px 10px;
+    border: 2px solid var(--sky-blue);
+    background: #000;
+    color: var(--snow-white);
+    font-size: 1.05rem;
+    font-weight: 900;
+}
+
+.network-date-modal-actions {
+    display: flex;
+    justify-content: center;
+    gap: 18px;
+    margin-top: 20px;
+}
+
+.network-date-apply,
+.network-date-cancel {
+    min-width: 150px;
+    min-height: 48px;
+    border: 2px solid var(--sky-blue);
+    color: var(--snow-white);
+    font-size: 1rem;
+    font-weight: 900;
+    touch-action: manipulation;
+}
+
+.network-date-apply {
+    background: #0879bd;
+}
+
+.network-date-cancel {
+    background: #063a79;
+}
+
+@media (max-width: 1280px) {
+    .network-modal-dialog,
+    .network-detail-dialog {
+        width: min(1230px, calc(100vw - 26px));
+        height: min(690px, calc(100vh - 26px));
+    }
+
+    .network-inline-detail-panel {
+        flex-basis: 138px;
+    }
+
+    .network-inline-detail-panel pre {
+        height: 68px;
+    }
+}
+
+/* 通信状況ダッシュボード：設計画像準拠の一覧・詳細モーダル */
+.network-modal-dialog,
+.network-detail-dialog {
+    left: 50% !important;
+    top: 50% !important;
+    width: calc(100vw - 96px) !important;
+    height: calc(100vh - 86px) !important;
+    max-width: none !important;
+    max-height: none !important;
+    padding: 10px !important;
+}
+
+.network-detail-dialog {
+    display: flex;
+    flex-direction: column;
+}
+
+.network-modal-title {
+    min-height: 30px;
+    font-size: 1.2rem;
+}
+
+.network-modal-header-row {
+    margin: 4px 0 6px;
+}
+
+.network-detail-tabs {
+    flex: 0 0 auto;
+}
+
+.network-detail-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 6px 8px 0;
+    border-left: 2px solid var(--snow-white);
+    border-right: 2px solid var(--snow-white);
+}
+
+.network-detail-info {
+    flex: 0 0 auto;
+    margin: 4px 0 8px;
+    font-size: 0.95rem;
+}
+
+.network-detail-controls {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    margin: 0 0 8px;
+}
+
+.network-sort-group {
+    margin-right: auto;
+}
+.network-range-group,
+.network-sort-group,
+.network-filter-group {
+    display: flex;
+    gap: 4px;
+}
+
+.network-tab,
+.network-filter,
+.network-range,
+.network-sort {
+    min-height: 34px;
+    padding: 0 14px;
+    border-width: 2px;
+    font-size: 0.92rem;
+    touch-action: manipulation;
+}
+
+.network-history-table-wrap {
+    flex: 1 1 auto;
+    min-height: 0;
+    border-top: 0;
+    overflow: auto;
+}
+
+.network-history-table {
+    font-size: 0.9rem;
+}
+
+.network-history-table th,
+.network-history-table td {
+    padding: 7px 8px;
+}
+
+.network-detail-button {
+    min-width: 58px;
+    min-height: 30px;
+    border: 0;
+    background: transparent;
+    color: var(--snow-white);
+    font-size: 0.9rem;
+    font-weight: 900;
+    touch-action: manipulation;
+}
+
+.network-detail-button:active {
+    color: var(--sky-yellow);
+}
+
+.network-inline-detail-panel {
+    display: none !important;
+}
+
+.network-error-detail-backdrop {
+    z-index: 1260;
+    background: rgba(0, 0, 0, 0.58);
+}
+
+.network-error-detail-dialog {
+    z-index: 1261;
+    width: min(590px, calc(100vw - 360px));
+    max-height: min(370px, calc(100vh - 180px));
+    padding: 12px;
+    border: 3px solid var(--sky-blue);
+    background: #062563;
+    color: var(--snow-white);
+    font-size: 0.95rem;
+}
+
+.network-error-detail-dialog pre {
+    height: 220px;
+    max-height: calc(100vh - 300px);
+    background: #000;
+    color: var(--snow-white);
+    overflow: auto;
+    touch-action: pan-y;
+}
+
+.network-date-modal-backdrop {
+    z-index: 1270;
+}
+
+.network-date-modal-dialog {
+    z-index: 1271;
+    width: min(560px, calc(100vw - 160px));
+    padding: 18px;
+}
+
+.network-date-field-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.network-date-field {
+    min-height: 72px;
+    padding: 8px 10px;
+    border: 2px solid var(--sky-blue);
+    background: #041a46;
+    color: var(--snow-white);
+    text-align: left;
+    font-weight: 900;
+    touch-action: manipulation;
+}
+
+.network-date-field.is-active {
+    background: var(--sky-yellow);
+    color: #000;
+}
+
+.network-date-field span,
+.network-date-field strong {
+    display: block;
+}
+
+.network-date-field span {
+    margin-bottom: 6px;
+    font-size: 0.88rem;
+}
+
+.network-date-field strong {
+    font-size: 1.1rem;
+    letter-spacing: 0;
+}
+
+.network-date-help {
+    margin: 10px 0;
+    color: var(--snow-gray-text);
+    font-size: 0.86rem;
+    text-align: center;
+}
+
+.network-number-pad {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.network-number-pad button {
+    min-height: 50px;
+    border: 2px solid var(--sky-blue);
+    background: #063a79;
+    color: var(--snow-white);
+    font-size: 1.25rem;
+    font-weight: 900;
+    touch-action: manipulation;
+}
+
+.network-number-pad button:active,
+.network-date-apply:active,
+.network-date-cancel:active {
+    background: var(--sky-yellow);
+    color: #000;
+}
+
+.network-date-modal-actions {
+    margin-top: 14px;
+}
+
+.network-date-apply,
+.network-date-cancel {
+    min-height: 46px;
+}
+
+@media (max-width: 1280px) {
+    .network-modal-dialog,
+    .network-detail-dialog {
+        width: calc(100vw - 70px) !important;
+        height: calc(100vh - 70px) !important;
+    }
+
+    .network-error-detail-dialog {
+        width: min(590px, calc(100vw - 260px));
+    }
+}
+
+.network-date-error {
+    margin: 10px 0 0;
+    padding: 8px 12px;
+    border: 2px solid #ffe66d;
+    color: #ffe66d;
+    background: rgba(0, 0, 0, 0.35);
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1.35;
 }
