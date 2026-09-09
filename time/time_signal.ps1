@@ -7,8 +7,20 @@ $projectDir = Split-Path -Path $PSScriptRoot -Parent
 $tempDir = Join-Path $projectDir "temp"
 $eewPriorityPath = Join-Path $projectDir "temp\eew_audio_priority.lock"
 $timeSignalPausePath = Join-Path $projectDir "temp\time_signal_pause_until.txt"
+$timeSignalIntervalPath = Join-Path $projectDir "temp\time_signal_interval_minutes.txt"
+$timeSignalVolume = 1.0
+$displayManualAwakePath = Join-Path $projectDir "temp\display_manual_awake.flag"
 $timeSignalControlPort = 18765
 $timeSignalControlListener = $null
+$sqliteHelperPath = Join-Path $projectDir "network_check\network_sqlite.ps1"
+. $sqliteHelperPath
+$networkSqlitePaths = Get-NetworkSqlitePaths -ProjectDir $projectDir
+$runtimeDbDir = $networkSqlitePaths.RuntimeDir
+$networkDbPath = $networkSqlitePaths.DatabasePath
+$legacyNetworkJsonlPath = $networkSqlitePaths.LegacyJsonlPath
+$sqliteExePath = $networkSqlitePaths.SqliteExePath
+$networkSummaryPath = Join-Path $runtimeDbDir "network_status_summary.json"
+$networkHistoryErrorMessage = ""
 
 Add-Type -TypeDefinition @"
 using System;
@@ -22,6 +34,14 @@ public static class TimeSignalDisplayPowerNativeMethods
         int Msg,
         IntPtr wParam,
         IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern void mouse_event(
+        int dwFlags,
+        int dx,
+        int dy,
+        int dwData,
+        UIntPtr dwExtraInfo);
 }
 "@
 
@@ -38,14 +58,254 @@ function Send-DisplayPowerOffCommand {
         [IntPtr]::new($monitorPowerOff)) | Out-Null
 }
 
+function Send-DisplayWakeCommand {
+    [TimeSignalDisplayPowerNativeMethods]::mouse_event(0x0001, 1, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 80
+    [TimeSignalDisplayPowerNativeMethods]::mouse_event(0x0001, -1, 0, 0, [UIntPtr]::Zero)
+}
+
+function Set-DisplayManualAwake {
+    if (-not (Test-Path -LiteralPath $tempDir -PathType Container)) {
+        New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
+    }
+    [IO.File]::WriteAllText($displayManualAwakePath, (Get-Date).ToString("o"), [Text.UTF8Encoding]::new($false))
+}
+
+function Clear-DisplayManualAwake {
+    Remove-Item -LiteralPath $displayManualAwakePath -Force -ErrorAction SilentlyContinue
+}
+
 function Get-DisplayPowerStatusJson {
     $payload = [ordered]@{
         ok = $true
+        manualAwake = (Test-Path -LiteralPath $displayManualAwakePath -PathType Leaf)
         now = (Get-Date).ToString("o")
     }
     return ($payload | ConvertTo-Json -Compress)
 }
+function Get-JsonResponse {
+    param([object]$Payload)
 
+    return ($Payload | ConvertTo-Json -Depth 12 -Compress)
+}
+
+function Read-NetworkSummary {
+    if (-not (Test-Path -LiteralPath $networkSummaryPath -PathType Leaf)) {
+        return [ordered]@{
+            updateTime = (Get-Date).ToString("o")
+            online = $false
+            offlineMode = $true
+            targets = @()
+            dataUpdates = @()
+            today = [ordered]@{
+                date = (Get-Date).ToString("yyyy-MM-dd")
+                offlineCount = 0
+                maxConsecutiveLoss = 0
+                totalOfflineSeconds = 0
+                lastLossAt = $null
+            }
+        }
+    }
+
+    try {
+        return Get-Content -Raw -Encoding UTF8 -LiteralPath $networkSummaryPath | ConvertFrom-Json
+    }
+    catch {
+        return [ordered]@{
+            updateTime = (Get-Date).ToString("o")
+            online = $false
+            offlineMode = $true
+            targets = @()
+            dataUpdates = @()
+            today = [ordered]@{
+                date = (Get-Date).ToString("yyyy-MM-dd")
+                offlineCount = 0
+                maxConsecutiveLoss = 0
+                totalOfflineSeconds = 0
+                lastLossAt = $null
+            }
+            error = $_.Exception.Message
+        }
+    }
+}
+
+function Get-QueryValue {
+    param(
+        [Uri]$Uri,
+        [string]$Name
+    )
+
+    $escapedName = [regex]::Escape($Name)
+    if ($Uri.Query -match "(?:\?|&)$escapedName=([^&]+)") {
+        return [Uri]::UnescapeDataString($matches[1])
+    }
+
+    return ""
+}
+
+function ConvertTo-NetworkDateTime {
+    param([string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $null }
+
+    $text = $Value.Trim()
+    $culture = [Globalization.CultureInfo]::InvariantCulture
+    $formats = @(
+        "yyyy-MM-ddTHH:mm:ss",
+        "yyyy-MM-dd HH:mm:ss",
+        "yyyy/MM/dd HH:mm:ss",
+        "yyyy-MM-ddTHH:mm:ss.fffK",
+        "yyyy-MM-ddTHH:mm:ssK",
+        "o",
+        "s"
+    )
+
+    foreach ($format in $formats) {
+        $parsedExact = [datetime]::MinValue
+        $styles = [Globalization.DateTimeStyles]::AssumeLocal
+        if ($format -eq "o" -or $format.EndsWith("K")) {
+            $styles = [Globalization.DateTimeStyles]::RoundtripKind
+        }
+        if ([datetime]::TryParseExact($text, $format, $culture, $styles, [ref]$parsedExact)) {
+            return $parsedExact
+        }
+    }
+
+    $parsed = [datetime]::MinValue
+    if ([datetime]::TryParse($text, $culture, [Globalization.DateTimeStyles]::AssumeLocal, [ref]$parsed)) {
+        return $parsed
+    }
+
+    return $null
+}
+function Read-NetworkHistory {
+    param(
+        [string]$TargetId,
+        [int]$Limit = 1200,
+        [int]$Offset = 0,
+        [string]$SortOrder = "desc",
+        [string]$ResultFilter,
+        [string]$Start,
+        [string]$End
+    )
+
+    if (-not (Test-Path -LiteralPath $runtimeDbDir -PathType Container)) {
+        New-Item -ItemType Directory -Force -Path $runtimeDbDir | Out-Null
+    }
+
+    Initialize-NetworkSqliteDatabase `
+        -RuntimeDir $runtimeDbDir `
+        -DatabasePath $networkDbPath `
+        -SqliteExePath $sqliteExePath
+    Import-LegacyNetworkJsonlToSqlite `
+        -SqliteExePath $sqliteExePath `
+        -DatabasePath $networkDbPath `
+        -LegacyJsonlPath $legacyNetworkJsonlPath
+
+    $safeLimit = [Math]::Min(50000, [Math]::Max(1, $Limit))
+    $safeOffset = [Math]::Max(0, $Offset)
+    $safeSortOrder = if ($SortOrder -eq "asc") { "asc" } else { "desc" }
+    $startDate = ConvertTo-NetworkDateTime -Value $Start
+    $endDate = ConvertTo-NetworkDateTime -Value $End
+    if ($startDate -and $endDate -and $endDate -lt $startDate) { return @() }
+
+    $script:networkHistoryErrorMessage = ""
+    try {
+        return @(Read-NetworkSqliteHistory `
+            -SqliteExePath $sqliteExePath `
+            -DatabasePath $networkDbPath `
+            -TargetId $TargetId `
+            -Limit $safeLimit `
+            -Offset $safeOffset `
+            -SortOrder $safeSortOrder `
+            -ResultFilter $ResultFilter `
+            -StartDate $startDate `
+            -EndDate $endDate)
+    }
+    catch {
+        $script:networkHistoryErrorMessage = $_.Exception.Message
+        return @()
+    }
+}
+
+function Get-NetworkStatusJson {
+    param([Uri]$Uri)
+
+    $limitText = Get-QueryValue -Uri $Uri -Name "limit"
+    $offsetText = Get-QueryValue -Uri $Uri -Name "offset"
+    $orderText = Get-QueryValue -Uri $Uri -Name "order"
+    $targetId = Get-QueryValue -Uri $Uri -Name "target"
+    $filterText = Get-QueryValue -Uri $Uri -Name "filter"
+    $startText = Get-QueryValue -Uri $Uri -Name "start"
+    $endText = Get-QueryValue -Uri $Uri -Name "end"
+    $limit = 1200
+    $offset = 0
+    if ($limitText -match '^\d+$') { $limit = [int]$limitText }
+    if ($offsetText -match '^\d+$') { $offset = [int]$offsetText }
+    if ($orderText -ne "asc") { $orderText = "desc" }
+
+    $historyRows = @(Read-NetworkHistory `
+        -TargetId $targetId `
+        -Limit $limit `
+        -Offset $offset `
+        -SortOrder $orderText `
+        -ResultFilter $filterText `
+        -Start $startText `
+        -End $endText)
+    return Get-JsonResponse ([ordered]@{
+        ok = $true
+        summary = Read-NetworkSummary
+        history = @($historyRows)
+        hasMore = ($historyRows.Count -ge $limit)
+        historyError = $script:networkHistoryErrorMessage
+        database = [ordered]@{
+            type = "SQLite"
+            path = $networkDbPath
+            table = "network_measurements"
+            sqlite = $sqliteExePath
+            exists = (Test-Path -LiteralPath $networkDbPath -PathType Leaf)
+        }
+    })
+}
+
+function Get-RestartAcceptedJson {
+    Start-Process shutdown.exe -ArgumentList "/r /t 0" -WindowStyle Hidden
+    return Get-JsonResponse ([ordered]@{
+        ok = $true
+        restarting = $true
+        now = (Get-Date).ToString("o")
+    })
+}
+
+function Get-TimeSignalIntervalMinutes {
+    if (-not (Test-Path -LiteralPath $timeSignalIntervalPath -PathType Leaf)) {
+        return 30
+    }
+
+    $value = 0
+    if ([int]::TryParse((Get-Content -LiteralPath $timeSignalIntervalPath -Raw).Trim(), [ref]$value) -and $value -in @(10, 30)) {
+        return $value
+    }
+
+    return 30
+}
+
+function Set-TimeSignalIntervalMinutes {
+    param([int]$Minutes)
+
+    if ($Minutes -notin @(10, 30)) {
+        throw "時報間隔は10分または30分で指定してください。"
+    }
+
+    if (-not (Test-Path -LiteralPath $tempDir -PathType Container)) {
+        New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
+    }
+    [IO.File]::WriteAllText(
+        $timeSignalIntervalPath,
+        [string]$Minutes,
+        [Text.UTF8Encoding]::new($false)
+    )
+}
 function Get-TimeSignalResetTime {
     param([datetime]$Now)
 
@@ -55,7 +315,6 @@ function Get-TimeSignalResetTime {
     }
     return $reset
 }
-
 function Save-TimeSignalPauseUntil {
     param([datetime]$Until)
 
@@ -109,6 +368,7 @@ function Get-TimeSignalPauseStatusJson {
         paused = $paused
         disabled = $disabled
         until = if ($paused -and $until) { $until.ToString("o") } else { $null }
+        intervalMinutes = Get-TimeSignalIntervalMinutes
         now = $now.ToString("o")
     }
     return ($payload | ConvertTo-Json -Compress)
@@ -159,10 +419,39 @@ function Invoke-TimeSignalControlRequest {
 
     $uri = [Uri]::new("http://127.0.0.1:$timeSignalControlPort$Target")
     if ($uri.AbsolutePath -eq "/time-signal/display/off") {
+        Clear-DisplayManualAwake
         Send-DisplayPowerOffCommand
         return Get-DisplayPowerStatusJson
     }
 
+    if ($uri.AbsolutePath -eq "/time-signal/display/wake") {
+        Set-DisplayManualAwake
+        Send-DisplayWakeCommand
+        return Get-DisplayPowerStatusJson
+    }
+
+    if ($uri.AbsolutePath -eq "/time-signal/network/status") {
+        return Get-NetworkStatusJson -Uri $uri
+    }
+
+    if ($uri.AbsolutePath -eq "/time-signal/system/restart") {
+        return Get-RestartAcceptedJson
+    }
+
+    if ($uri.AbsolutePath -eq "/time-signal/interval") {
+        if (Test-TimeSignalControlDisabled -Now (Get-Date)) {
+            return Get-TimeSignalPauseStatusJson
+        }
+
+        $minutesText = Get-QueryValue -Uri $uri -Name "minutes"
+        $minutes = 0
+        if (-not [int]::TryParse($minutesText, [ref]$minutes) -or $minutes -notin @(10, 30)) {
+            return Get-TimeSignalPauseStatusJson
+        }
+
+        Set-TimeSignalIntervalMinutes -Minutes $minutes
+        return Get-TimeSignalPauseStatusJson
+    }
     if ($uri.AbsolutePath -eq "/time-signal/resume") {
         Clear-TimeSignalPause
         return Get-TimeSignalPauseStatusJson
@@ -276,6 +565,7 @@ function Play-Sound {
 
     $player = New-Object System.Windows.Media.MediaPlayer
     $player.Open([Uri]$filePath)
+    $player.Volume = $timeSignalVolume
     Start-Sleep -Milliseconds 200
     $player.Play()
 
@@ -330,10 +620,11 @@ function Start-Time-Signal {
     $hour = $now.Hour
     $minute = $now.Minute
     $second = $now.Second
+    $intervalMinutes = Get-TimeSignalIntervalMinutes
 
     if (Test-EewPriorityActive) { return }
     if ($second -ne 0) { return }
-    if ($minute % 10 -ne 0) { return }
+    if ($minute % $intervalMinutes -ne 0) { return }
     if (Test-TimeSignalQuietHours -Now $now) {
         $script:lastPlayedMinute = -1
         Write-Host "夜間消音時間帯のため時報をスキップ"
@@ -348,53 +639,72 @@ function Start-Time-Signal {
 
     $hourPath = Join-Path $basePath "hour_24h"
     $minPath = Join-Path $basePath "minutes_24h"
-
     $titleJustSound = Join-Path $hourPath "time_signal_just_title_sound.mp3"
-    $title30Sound = Join-Path $hourPath "time_signal_30_title_sound.mp3"
+    $titleVoice = Join-Path $hourPath "time_signal_title_voice.mp3"
+    $hourJustFile = Join-Path $hourPath "time_signal_${hour}_hour_just.mp3"
+    $hourFile = Join-Path $hourPath "time_signal_${hour}_hour.mp3"
+    $minFile = Join-Path $minPath "time_signal_${minute}_min.mp3"
+
+    if ($minute -eq 0) {
+        if ($intervalMinutes -eq 30) {
+            $random30Path = Join-Path $hourPath "random_30"
+            $randomFiles = @(
+                [IO.Directory]::GetFiles($random30Path, "*.mp3", [IO.SearchOption]::TopDirectoryOnly)
+            )
+            if ($randomFiles.Count -gt 0) {
+                $randomIndex = Get-Random -Minimum 0 -Maximum $randomFiles.Count
+                $randomFilePath = $randomFiles[$randomIndex]
+                Write-Host "30分間隔ランダム音源: $randomFilePath"
+                if (-not (Play-Sound $randomFilePath)) { return }
+            }
+        }
+        else {
+            if (-not (Play-Sound $titleJustSound)) { return }
+        }
+
+        if (-not (Play-Sound $titleVoice)) { return }
+        [void](Play-Sound $hourJustFile)
+        return
+    }
+
+    if ($minute -eq 30) {
+        if ($intervalMinutes -eq 30) {
+            $random30Path = Join-Path $hourPath "random_30"
+            $randomFiles = @(
+                [IO.Directory]::GetFiles($random30Path, "*.mp3", [IO.SearchOption]::TopDirectoryOnly)
+            )
+            if ($randomFiles.Count -gt 0) {
+                $randomIndex = Get-Random -Minimum 0 -Maximum $randomFiles.Count
+                $randomFilePath = $randomFiles[$randomIndex]
+                Write-Host "30分間隔ランダム音源: $randomFilePath"
+                if (-not (Play-Sound $randomFilePath)) { return }
+            }
+        }
+        else {
+            $title30Sound = Join-Path $hourPath "time_signal_30_title_sound.mp3"
+            if (-not (Play-Sound $title30Sound)) { return }
+        }
+
+        if (-not (Play-Sound $titleVoice)) { return }
+        if (-not (Play-Sound $hourFile)) { return }
+        [void](Play-Sound $minFile)
+        return
+    }
+
+    if ($intervalMinutes -ne 10) { return }
+
     $titleSoundMap = @{
         10 = Join-Path $hourPath "time_signal_10_title_sound.mp3"
         20 = Join-Path $hourPath "time_signal_20_title_sound.mp3"
         40 = Join-Path $hourPath "time_signal_40_title_sound.mp3"
         50 = Join-Path $hourPath "time_signal_50_title_sound.mp3"
     }
-    $titleVoice = Join-Path $hourPath "time_signal_title_voice.mp3"
-
-    if ($minute -eq 0) {
-        if (-not (Play-Sound $titleJustSound)) { return }
-        if (-not (Play-Sound $titleVoice)) { return }
-
-        $hourFile = Join-Path $hourPath "time_signal_${hour}_hour_just.mp3"
-        Write-Host "時:$hourFile"
-        [void](Play-Sound $hourFile)
-        return
-    }
-
-    $hourFile = Join-Path $hourPath "time_signal_${hour}_hour.mp3"
-    $minFile = Join-Path $minPath "time_signal_${minute}_min.mp3"
-
-    if ($minute -eq 30) {
-        if (-not (Play-Sound $title30Sound)) { return }
-        if (-not (Play-Sound $titleVoice)) { return }
-
-        Write-Host "時:$hourFile"
-        Write-Host "分:$minFile"
-        if (-not (Play-Sound $hourFile)) { return }
-        [void](Play-Sound $minFile)
-        return
-    }
-
     $titleSound = $titleSoundMap[$minute]
     if (-not $titleSound) { return }
     if (-not (Play-Sound $titleSound)) { return }
-
-    if ($announceTimeAtOtherTenMinutes) {
-        if (-not (Play-Sound $titleVoice)) { return }
-
-        Write-Host "時:$hourFile"
-        Write-Host "分:$minFile"
-        if (-not (Play-Sound $hourFile)) { return }
-        [void](Play-Sound $minFile)
-    }
+    if (-not (Play-Sound $titleVoice)) { return }
+    if (-not (Play-Sound $hourFile)) { return }
+    [void](Play-Sound $minFile)
 }
 # メインループ（秒同期）
 Start-TimeSignalControlServer

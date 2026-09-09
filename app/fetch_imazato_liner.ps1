@@ -337,9 +337,7 @@ while ($true) {
         if (Test-Path -LiteralPath $temporaryPath) {
             Remove-Item -LiteralPath $temporaryPath -Force
         }
-        if (Test-Path -LiteralPath $filePath) {
-            Remove-Item -LiteralPath $filePath -Force
-        }
+        # 取得失敗時も最後に成功したデータを残し、画面が途中で調整中へ戻らないようにする。
     }
 
     if ($RunOnce) {

@@ -2,12 +2,16 @@
     const root = document.documentElement;
     const visibleClass = "signage-pointer-visible";
     const hiddenDelayMs = 3000;
+    const startupIgnoreMs = 5000;
     const moveThresholdPx = 3;
+    const startedAt = Date.now();
     let hideTimer = null;
     let lastMousePosition = null;
 
     function hidePointer() {
         root.classList.remove(visibleClass);
+        root.style.cursor = "none";
+        if (document.body) document.body.style.cursor = "none";
         hideTimer = null;
     }
 
@@ -32,13 +36,25 @@
         return dx >= moveThresholdPx || dy >= moveThresholdPx;
     }
 
+    function shouldIgnoreStartupMove(event) {
+        if (Date.now() - startedAt >= startupIgnoreMs) return false;
+        lastMousePosition = { x: event.clientX, y: event.clientY };
+        hidePointer();
+        return true;
+    }
+
     function handlePointerMove(event) {
-        if (event.pointerType && event.pointerType !== "mouse") return;
+        if (event.pointerType && event.pointerType !== "mouse") {
+            hidePointer();
+            return;
+        }
+        if (shouldIgnoreStartupMove(event)) return;
         if (!hasMouseReallyMoved(event)) return;
         showPointerTemporarily();
     }
 
     function handleMouseMove(event) {
+        if (shouldIgnoreStartupMove(event)) return;
         if (!hasMouseReallyMoved(event)) return;
         showPointerTemporarily();
     }
@@ -59,8 +75,26 @@
         passive: true,
     });
     document.addEventListener("mousemove", handleMouseMove, { passive: true });
-    document.addEventListener("touchstart", preventPinchZoom, { passive: false });
+    document.addEventListener("pointerdown", hidePointer, {
+        passive: true,
+        capture: true,
+    });
+    document.addEventListener("touchstart", (event) => {
+        hidePointer();
+        preventPinchZoom(event);
+    }, { passive: false, capture: true });
     document.addEventListener("touchmove", preventPinchZoom, { passive: false });
     document.addEventListener("wheel", preventCtrlWheelZoom, { passive: false });
+    const startupHideTimer = setInterval(() => {
+        hidePointer();
+        if (Date.now() - startedAt >= startupIgnoreMs) {
+            clearInterval(startupHideTimer);
+        }
+    }, 100);
+    document.addEventListener("DOMContentLoaded", hidePointer, { once: true });
+    window.addEventListener("load", hidePointer, { once: true });
+    document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) hidePointer();
+    });
     hidePointer();
 })();

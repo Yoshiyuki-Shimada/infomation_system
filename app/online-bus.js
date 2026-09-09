@@ -1,4 +1,5 @@
-const ONLINE_BUS_MAX_AGE_MS = 120000;
+﻿const ONLINE_BUS_MAX_AGE_MS = 120000;
+const ONLINE_BUS_LOCAL_RELOAD_MS = 1000;
 
 let onlineBusState = {
     fetchedAt: null,
@@ -497,12 +498,18 @@ function reloadOnlineBusData() {
     script.onload = () => {
         onlineBusReloadTimer = setTimeout(
             reloadOnlineBusData,
-            onlineBusState.reloadIntervalMs,
+            Math.min(onlineBusState.reloadIntervalMs, ONLINE_BUS_LOCAL_RELOAD_MS),
         );
     };
     script.onerror = () => {
         script.remove();
-        onlineBusReloadTimer = setTimeout(reloadOnlineBusData, 30000);
+        onlineBusState.fetchedAt = null;
+        onlineBusState.schedule = null;
+        if (typeof refresh === "function") refresh();
+        onlineBusReloadTimer = setTimeout(
+            reloadOnlineBusData,
+            ONLINE_BUS_LOCAL_RELOAD_MS,
+        );
     };
     document.head.appendChild(script);
 }

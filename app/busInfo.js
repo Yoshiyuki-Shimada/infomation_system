@@ -195,7 +195,7 @@ function isStartDepartureUndetected(bus, now, baseDate) {
         baseDate,
     ).pure_seconds;
 
-    return startDiffSeconds <= -300;
+    return startDiffSeconds <= -120;
 }
 
 function getBusRemovalTime(bus, now, baseDate) {
@@ -412,27 +412,39 @@ function pickBusDisplayInfo(
     statusInfo,
     lastInfo,
     suspensionInfo,
+    fallbackInfo,
 ) {
-    if (cycleSeconds < 7) {
-        if (remainingInfo && delayInfo) {
-            return cycleSeconds < 4 ? remainingInfo : delayInfo;
-        }
-        return remainingInfo || delayInfo || lastInfo || suspensionInfo || statusInfo;
+    if (suspensionInfo) return suspensionInfo;
+
+    const statusInfos = [
+        statusInfo,
+        lastInfo,
+        suspensionInfo,
+        fallbackInfo,
+        delayInfo,
+    ].filter(Boolean);
+
+    if (remainingInfo && statusInfos.length > 0 && cycleSeconds < 7) {
+        const statusIndex = Math.min(
+            statusInfos.length - 1,
+            Math.floor(Math.max(0, cycleSeconds - 3) / 2),
+        );
+        return cycleSeconds < 3 ? remainingInfo : statusInfos[statusIndex];
     }
 
-    const statusInfos = [statusInfo, lastInfo, suspensionInfo].filter(Boolean);
     if (statusInfos.length === 2) {
         return cycleSeconds < 9 ? statusInfos[0] : statusInfos[1];
     }
     if (statusInfos.length > 2) {
-        if (cycleSeconds < 9) return statusInfos[0];
-        if (cycleSeconds < 10.5) return statusInfos[1];
-        return statusInfos[2];
+        const statusIndex = Math.min(
+            statusInfos.length - 1,
+            Math.floor(Math.max(0, cycleSeconds - 7) / 2),
+        );
+        return statusInfos[statusIndex];
     }
 
-    return statusInfo || lastInfo || suspensionInfo || delayInfo || remainingInfo;
+    return statusInfos[0] || remainingInfo;
 }
-
 function getTimetableFallbackStatus(bus, cycleSeconds) {
     if (bus.timetableFlg !== true || bus.onlineFlg === true) {
         return null;
@@ -630,7 +642,7 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
                 ? { text: "\u904b\u8ee2\u4f11\u6b62", color: "#e02135" }
                 : null;
             const isWithinDetailWindow =
-                (diff >= 0 || hasMajorDelay) && diff_sec_pure < 900;
+                (diff >= 0 || hasMajorDelay) && diff_sec_pure <= 900;
             const isScheduledInSoonWindow =
                 hasMajorDelay && diff_sec_pure <= 270;
             const predictionWithinSevenMinutes = predictedSeconds <= 420;
@@ -641,81 +653,62 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
 
             engText = engModeChange(engMode, info, bus.msg);
 
-            let displayInfo = null;
+            const scheduledSecondsForDisplay = Math.max(0, diff_sec_pure);
+            const scheduledDiffForDisplay = {
+                minutes: Math.floor(scheduledSecondsForDisplay / 60),
+                seconds: scheduledSecondsForDisplay % 60,
+            };
+            const remainingResult = visibleTime(
+                false,
+                bus.lastFlg,
+                scheduledDiffForDisplay.minutes,
+                scheduledDiffForDisplay.seconds,
+                scheduledSecondsForDisplay,
+                hasMajorDelay,
+            );
+            const remainingInfo =
+                !suspensionInfo &&
+                diff_sec_pure >= 0 &&
+                diff_sec_pure < 3600 &&
+                !delayOnly &&
+                !showSoon &&
+                remainingResult
+                    ? {
+                          text: remainingResult.text,
+                          color: remainingResult.color,
+                      }
+                    : null;
+            let operationInfo = null;
+            let progressInfo = null;
             let statusInfo = null;
+            const delayInfo = delayStatusInfo;
 
             if (isWithinDetailWindow) {
-                const scheduledSecondsForDisplay = Math.max(0, diff_sec_pure);
-                const scheduledDiffForDisplay = {
-                    minutes: Math.floor(scheduledSecondsForDisplay / 60),
-                    seconds: scheduledSecondsForDisplay % 60,
-                };
-                const remainingResult = visibleTime(
-                    false,
-                    bus.lastFlg,
-                    scheduledDiffForDisplay.minutes,
-                    scheduledDiffForDisplay.seconds,
-                    scheduledSecondsForDisplay,
-                    hasMajorDelay,
-                );
-                const remainingInfo =
-                    !suspensionInfo &&
-                    diff_sec_pure >= 0 &&
-                    !delayOnly &&
-                    !showSoon
-                        ? {
-                              text: remainingResult.text,
-                              color: remainingResult.color,
-                          }
-                        : null;
-                const delayInfo = delayStatusInfo;
                 const travelResult = getTravelStatus(
                     diff,
                     diff_sec_pure,
                     hasMajorDelay,
                 );
                 statusInfo =
-                    !suspensionInfo && showSoon
-                        ? { text: "\u307e\u3082\u306a\u304f", color: "#ee7b1a" }
-                        : !suspensionInfo && travelResult.text
-                          ? {
-                                text: travelResult.text,
-                                color: travelResult.color,
-                            }
-                          : null;
-
-                displayInfo = pickBusDisplayInfo(
-                    cycleSeconds,
-                    remainingInfo,
-                    delayInfo,
-                    statusInfo,
-                    lastInfo,
-                    suspensionInfo,
-                );
-
-            } else {
-                displayInfo = pickBusDisplayInfo(
-                    cycleSeconds,
-                    null,
-                    delayStatusInfo,
-                    null,
-                    lastInfo,
-                    suspensionInfo,
-                );
-
-
+                    !suspensionInfo && !showSoon && travelResult.text
+                        ? {
+                              text: travelResult.text,
+                              color: travelResult.color,
+                          }
+                        : null;
             }
-
-            if (displayInfo) {
-                status = displayInfo.text;
-                status_color = displayInfo.color;
-            }
-
-            if (isWaitingForOnlineInfo) {
-                status = timetableFallbackStatus.text;
-                status_color = timetableFallbackStatus.color;
-            }
-
+            operationInfo = pickBusDisplayInfo(
+                cycleSeconds,
+                null,
+                delayInfo,
+                null,
+                lastInfo,
+                suspensionInfo,
+                timetableFallbackStatus,
+            );
+            progressInfo = showSoon
+                ? { text: "まもなく", color: "#ee7b1a" }
+                : remainingInfo;
             if (bus.suspensionFlg) {
                 imgName = "suspension.png";
             } else if (showSoon) {
@@ -753,18 +746,21 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
                 ? "char-icon char-icon-status"
                 : "char-icon";
 
+            const charStatusHtml = statusInfo
+                ? `<div class="char-status" style="color: ${statusInfo.color};">${statusInfo.text}</div>`
+                : "";
             const charHtml = imgName
-                ? `<div class="char-container"><img src="img/${imgName}" class="${charIconClass}"></div>`
+                ? `<div class="char-container"><img src="img/${imgName}" class="${charIconClass}">${charStatusHtml}</div>`
                 : '<div class="char-container"></div>';
             const lineNumberStyle = getLineNumberStyle(bus.line);
 
             return `
                 <div class="bus-row">
                     <div class="time-block">
+                        <div class="status operation-status" style="color: ${operationInfo?.color || "#e02135"};">${operationInfo?.text || ""}</div>
                         <div class="scheduled-time">${bus.time}</div>
-                        <div class="status${hasMajorDelay && status === bus.delayText ? " delay-status" : ""}" style="color: ${status_color};">${status}</div>
+                        <div class="status progress-status${hasMajorDelay && progressInfo?.text === bus.delayText ? " delay-status" : ""}" style="color: ${progressInfo?.color || "#fff"};">${progressInfo?.text || ""}</div>
                     </div>
-
                     <div class="line-number"${lineNumberStyle}>${bus.line}</div>
 
                     <div class="destination-info">
@@ -935,6 +931,24 @@ function visibleTime(
         };
     }
 
+    if (diff_sec_pure >= 3600) {
+        return null;
+    }
+
+    if (diff_sec_pure > 1800) {
+        return {
+            text: `あと約${Math.floor(diff_sec_pure / 60)}分`,
+            color: "#fff",
+        };
+    }
+
+    if (diff_sec_pure > 900) {
+        return {
+            text: `あと${displayMinutes}分${displaySeconds}秒`,
+            color: "#fff",
+        };
+    }
+
     if (diff_sec_pure <= 270) {
         return {
             text: `あと${displayMinutes}分${displaySeconds}秒`,
@@ -954,7 +968,6 @@ function visibleTime(
         color: diff > 8 && diff_sec_pure <= 600 ? "#019a66" : diff > 8 ? "#38d5ff" : "#ffe766",
     };
 }
-
 function engModeChange(engMode, info, bus_msg) {
     let ans = "";
     switch (engMode) {

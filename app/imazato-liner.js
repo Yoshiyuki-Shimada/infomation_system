@@ -1,4 +1,6 @@
 const IMAZATO_LINER_MAX_AGE_MS = 120000;
+const IMAZATO_LINER_LOCAL_RELOAD_MS = 1000;
+let imazatoLinerAutoDisplayOffDateKey = "";
 
 const imazatoLinerDestinationMaster = {
     あべの橋: {
@@ -158,12 +160,16 @@ function calculateImazatoLinerDelay(passInfo) {
     return 0;
 }
 
-function hasImazatoLinerDelayEstimateNotice(delayEstimateText) {
-    return /約?\s*\d+\s*分遅れ.*発車(?:予定|見込み)/.test(
-        normalizeImazatoLinerText(delayEstimateText),
+function parseImazatoLinerDelayEstimateMinutes(delayEstimateText) {
+    const match = normalizeImazatoLinerText(delayEstimateText).match(
+        /約?\s*(\d+)\s*分遅れ.*発車(?:予定|見込み)/,
     );
+    return match ? Number(match[1]) : 0;
 }
 
+function hasImazatoLinerDelayEstimateNotice(delayEstimateText) {
+    return parseImazatoLinerDelayEstimateMinutes(delayEstimateText) > 0;
+}
 function parseImazatoLinerStartDepartureTime(value) {
     const text = normalizeImazatoLinerText(value);
     const plannedMatch = text.match(
@@ -446,17 +452,28 @@ function parseImazatoLinerApproachHtml(html) {
                     startScheduledTime,
                     startDepartureTime,
                 );
+            const delayEstimateMinutes = parseImazatoLinerDelayEstimateMinutes(
+                delayEstimateText,
+            );
+            const delayEstimateTime =
+                !time.predictedTime && delayEstimateMinutes >= 5
+                    ? addImazatoLinerMinutes(
+                          time.scheduledTime,
+                          delayEstimateMinutes,
+                      )
+                    : "";
             const startDepartureUndetectedFlg =
                 !!startDepartureTime &&
                 /発車前/.test(allText) &&
                 !hasImazatoLinerDelayEstimateNotice(delayEstimateText);
             const delayMinutes = calculateImazatoLinerDelay(passInfo);
-
             if (!time.scheduledTime || !destination) return null;
 
             return {
                 time: normalizeImazatoLinerTime(time.scheduledTime),
                 predictedTime: normalizeImazatoLinerTime(time.predictedTime),
+                delayEstimateTime: normalizeImazatoLinerTime(delayEstimateTime),
+                delayEstimateMinutes,
                 scheduledTimeExplicit: time.scheduledTimeExplicit,
                 startDepartureTime,
                 startDepartureDelayMinutes,
@@ -587,18 +604,28 @@ function isImazatoLinerStartDepartureUndetected(bus, now) {
     if (!bus.onlineFlg || !bus.startDepartureUndetectedFlg) return false;
     if (!bus.startDepartureTime) return false;
 
-    return getSecondsUntilImazatoLiner(bus.startDepartureTime, now) <= -300;
+    return getSecondsUntilImazatoLiner(bus.startDepartureTime, now) <= -120;
+}
+
+function addImazatoLinerMinutes(time, minutes) {
+    const totalMinutes = getImazatoLinerMinutesOfDay(time);
+    if (totalMinutes === null) return "";
+
+    const adjustedMinutes = (totalMinutes + minutes) % 1440;
+    const hour = Math.floor(adjustedMinutes / 60);
+    const minute = adjustedMinutes % 60;
+    return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
 function getImazatoLinerDisplayBaseTime(bus, now = new Date()) {
     if (isImazatoLinerStartDepartureUndetected(bus, now)) {
-        return bus.predictedTime || bus.time;
+        return bus.predictedTime || bus.delayEstimateTime || bus.time;
     }
     if (bus.predictedTime) return bus.predictedTime;
+    if (bus.delayEstimateTime) return bus.delayEstimateTime;
 
     return bus.time;
 }
-
 function getImazatoLinerRemovalSeconds(bus, now) {
     if (isImazatoLinerStartDepartureUndetected(bus, now)) {
         if (bus.predictedTime) return getSecondsUntilImazatoLiner(bus.predictedTime, now);
@@ -620,41 +647,72 @@ function getImazatoLinerTimetableFallbackStatus(bus, cycleSeconds) {
     return { text: "運行情報未取得", color: "#8c8f93" };
 }
 
-function getImazatoLinerRowStatus(bus, now = new Date()) {
+function getImazatoLinerRemainingInfo(bus, now = new Date()) {
+    const displayTime = getImazatoLinerDisplayBaseTime(bus, now);
+    const secondsUntilDeparture = getSecondsUntilImazatoLiner(displayTime, now);
+
+    if (secondsUntilDeparture < 0 || secondsUntilDeparture > 3540) {
+        return null;
+    }
+
+    const remainingMinutes = Math.floor(secondsUntilDeparture / 60);
+    const remainingSeconds = secondsUntilDeparture % 60;
+    const text = secondsUntilDeparture < 1800
+        ? `あと${remainingMinutes}分${String(remainingSeconds).padStart(2, "0")}秒`
+        : `あと約${remainingMinutes}分`;
+
+    return {
+        text,
+        color: "#fff",
+    };
+}
+
+function getImazatoLinerRowStatuses(bus, now = new Date()) {
     const cycleSeconds = Math.floor(Date.now() / 1000) % 12;
     const fallbackStatus = getImazatoLinerTimetableFallbackStatus(
         bus,
         cycleSeconds,
     );
-    if (fallbackStatus) return fallbackStatus;
+    const remainingInfo = getImazatoLinerRemainingInfo(bus, now);
 
     if (bus.suspensionFlg) {
-        return { text: "運休", color: "#e02135" };
+        return {
+            operation: { text: "運休", color: "#e02135" },
+            progress: null,
+        };
     }
 
-    if (isImazatoLinerStartDepartureUndetected(bus, now)) {
-        return { text: "始発発車未検知", color: "#e02135" };
+    let operationStatus = fallbackStatus;
+    const delayEstimateInfo = Number(bus.delayEstimateMinutes) >= 5
+        ? {
+              text: `約${bus.delayEstimateMinutes}分遅れ見込み`,
+              color: "#e02135",
+          }
+        : null;
+
+    if (!operationStatus && delayEstimateInfo) {
+        operationStatus = delayEstimateInfo;
     }
 
-    if (bus.lastFlg && Number(bus.delayMinutes) >= 3) {
-        return cycleSeconds < 6
-            ? { text: `約${bus.delayMinutes}分遅れ`, color: "#e02135" }
-            : { text: "最終", color: "#e02135" };
+    if (!operationStatus && isImazatoLinerStartDepartureUndetected(bus, now)) {
+        operationStatus = { text: "始発発車未検知", color: "#e02135" };
     }
 
-    if (Number(bus.delayMinutes) >= 3) {
-        return { text: `約${bus.delayMinutes}分遅れ`, color: "#e02135" };
+    if (!operationStatus && Number(bus.delayMinutes) >= 3) {
+        operationStatus = { text: `約${bus.delayMinutes}分遅れ`, color: "#e02135" };
     }
 
-    if (bus.lastFlg) {
-        return { text: "最終", color: "#e02135" };
+    if (!operationStatus && bus.lastFlg) {
+        operationStatus = { text: "最終", color: "#e02135" };
     }
 
-    return { text: "", color: "#e02135" };
-}
-function createImazatoLinerRow(bus, now = new Date()) {
+    return {
+        operation: operationStatus,
+        progress: remainingInfo,
+    };
+}function createImazatoLinerRow(bus, now = new Date()) {
     const destinationInfo = getImazatoLinerDestinationInfo(bus.destination);
-    const status = getImazatoLinerRowStatus(bus, now);
+    const statuses = getImazatoLinerRowStatuses(bus, now);
     const guideMode = Math.floor(Date.now() / 8000) % 3;
     const viaText = destinationInfo.via;
     const destinationText = destinationInfo.displayName || bus.destination;
@@ -668,10 +726,10 @@ function createImazatoLinerRow(bus, now = new Date()) {
     return `
         <div class="bus-row liner-schedule-row">
             <div class="time-block liner-time-block">
+                <div class="status operation-status liner-operation-status" style="color: ${statuses.operation?.color || "#e02135"};">${statuses.operation?.text || ""}</div>
                 <div class="scheduled-time liner-scheduled-time">${bus.time}</div>
-                <div class="status liner-row-status" style="color: ${status.color};">${status.text}</div>
-            </div>
-            <div class="line-number liner-line-number">${bus.line}</div>
+                <div class="status liner-row-status" style="color: ${statuses.progress?.color || "#fff"};">${statuses.progress?.text || ""}</div>
+            </div>            <div class="line-number liner-line-number">${bus.line}</div>
             <div class="destination-info">
                 <div class="via liner-via">${viaText}</div>
                 <div class="destination liner-destination">
@@ -682,27 +740,71 @@ function createImazatoLinerRow(bus, now = new Date()) {
         </div>
     `;
 }
+function isImazatoLinerPagingTarget(bus, now) {
+    if (isImazatoLinerStartDepartureUndetected(bus, now)) return true;
+
+    const scheduledSeconds = getSecondsUntilImazatoLiner(bus.time, now);
+    const displayTime = getImazatoLinerDisplayBaseTime(bus, now);
+    const displaySeconds = getSecondsUntilImazatoLiner(displayTime, now);
+
+    return scheduledSeconds <= 1500 || displaySeconds <= 1500;
+}
+
+function getImazatoLinerPagingWindow(activeBuses, now) {
+    const pagingTargets = activeBuses.filter((bus) =>
+        isImazatoLinerPagingTarget(bus, now),
+    );
+    if (pagingTargets.length < 3) return activeBuses.slice(0, 3);
+
+    const latestTargetSeconds = Math.max(
+        ...pagingTargets.map((bus) =>
+            getSecondsUntilImazatoLiner(
+                getImazatoLinerDisplayBaseTime(bus, now),
+                now,
+            ),
+        ),
+    );
+
+    return activeBuses.filter((bus) =>
+        getSecondsUntilImazatoLiner(
+            getImazatoLinerDisplayBaseTime(bus, now),
+            now,
+        ) <= latestTargetSeconds,
+    );
+}
+
 function renderImazatoLinerList(elementId, buses, now) {
     const element = document.getElementById(elementId);
     if (!element) return [];
 
+    const activeBuses = [...buses]
+        .sort((a, b) => {
+            const aTime = getImazatoLinerDisplayBaseTime(a, now);
+            const bTime = getImazatoLinerDisplayBaseTime(b, now);
+            return (
+                getSecondsUntilImazatoLiner(aTime, now) -
+                getSecondsUntilImazatoLiner(bTime, now)
+            );
+        })
+        .filter((bus) => getImazatoLinerRemovalSeconds(bus, now) > 470);
+    const pagingWindow = getImazatoLinerPagingWindow(activeBuses, now);
+    const pageSize = 3;
+    const totalPages = Math.max(1, Math.ceil(pagingWindow.length / pageSize));
+    const pageIndex = totalPages > 1
+        ? Math.floor(Date.now() / 15000) % totalPages
+        : 0;
+    const pageBuses = pagingWindow.slice(
+        pageIndex * pageSize,
+        pageIndex * pageSize + pageSize,
+    );
     const displayedRows = [];
     const displayedBuses = [];
-    const sortedBuses = [...buses].sort((a, b) => {
-        const aTime = getImazatoLinerDisplayBaseTime(a, now);
-        const bTime = getImazatoLinerDisplayBaseTime(b, now);
-        return (
-            getSecondsUntilImazatoLiner(aTime, now) -
-            getSecondsUntilImazatoLiner(bTime, now)
-        );
-    });
 
-    for (const bus of sortedBuses) {
+    for (const bus of pageBuses) {
         const secondsUntilRemoval = getImazatoLinerRemovalSeconds(bus, now);
+        if (secondsUntilRemoval <= 470) continue;
 
-        if (secondsUntilRemoval <= 590) continue;
-
-        if (secondsUntilRemoval <= 600) {
+        if (secondsUntilRemoval <= 480) {
             displayedRows.push(
                 '<div class="bus-row liner-schedule-row liner-blank-row"></div>',
             );
@@ -710,8 +812,6 @@ function renderImazatoLinerList(elementId, buses, now) {
             displayedRows.push(createImazatoLinerRow(bus, now));
         }
         displayedBuses.push(bus);
-
-        if (displayedRows.length >= 3) break;
     }
 
     element.innerHTML = displayedRows.length
@@ -720,7 +820,6 @@ function renderImazatoLinerList(elementId, buses, now) {
 
     return displayedBuses;
 }
-
 function getImazatoLinerGuideData(stopKey, bus) {
     const destination = getImazatoLinerDestination(bus);
     const guideData = imazatoLinerGuideMaster[stopKey]?.[destination];
@@ -791,7 +890,7 @@ function getImazatoLinerGuideTargetBus(stopKey, buses, now) {
         .filter((bus) => getImazatoLinerGuideData(stopKey, bus))
         .filter((bus) => {
             const guideTime = getImazatoLinerDisplayBaseTime(bus, now);
-            return getSecondsUntilImazatoLiner(guideTime, now) > 600;
+            return getSecondsUntilImazatoLiner(guideTime, now) > 480;
         })
         .sort((a, b) => {
             const aTime = getImazatoLinerDisplayBaseTime(a, now);
@@ -890,10 +989,27 @@ function showImazatoLinerAdjusting() {
     });
 }
 
+function getImazatoLinerDateKey(now = new Date()) {
+    return `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
+}
+
+function requestImazatoLinerDisplayOff() {
+    fetch("http://127.0.0.1:18765/time-signal/display/off", {
+        cache: "no-store",
+    }).catch((error) => {
+        console.warn("Imazato Liner display off request failed", error);
+    });
+}
+
 function updateImazatoLinerScreenOff(now = new Date()) {
+    document.body.classList.remove("liner-screen-off");
+
     const minutesFromMidnight = now.getHours() * 60 + now.getMinutes();
-    const isScreenOff = minutesFromMidnight >= 5 && minutesFromMidnight < 355;
-    document.body.classList.toggle("liner-screen-off", isScreenOff);
+    const todayKey = getImazatoLinerDateKey(now);
+    if (minutesFromMidnight === 5 && imazatoLinerAutoDisplayOffDateKey !== todayKey) {
+        imazatoLinerAutoDisplayOffDateKey = todayKey;
+        requestImazatoLinerDisplayOff();
+    }
 }
 
 function refreshImazatoLinerDisplay() {
@@ -993,18 +1109,17 @@ function reloadImazatoLinerData() {
         refreshImazatoLinerDisplay();
         imazatoLinerReloadTimer = setTimeout(
             reloadImazatoLinerData,
-            imazatoLinerState.reloadIntervalMs,
+            Math.min(imazatoLinerState.reloadIntervalMs, IMAZATO_LINER_LOCAL_RELOAD_MS),
         );
     };
     script.onerror = () => {
         script.remove();
-        imazatoLinerState.fetchedAt = null;
-        imazatoLinerState.timetableDate = "";
-        imazatoLinerState.schedule = null;
-        refreshImazatoLinerDisplay();
+        if (!imazatoLinerState.fetchedAt || !imazatoLinerState.schedule) {
+            refreshImazatoLinerDisplay();
+        }
         imazatoLinerReloadTimer = setTimeout(
             reloadImazatoLinerData,
-            30000,
+            IMAZATO_LINER_LOCAL_RELOAD_MS,
         );
     };
     document.head.appendChild(script);

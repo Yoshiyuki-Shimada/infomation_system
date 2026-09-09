@@ -4,6 +4,7 @@
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
         <title>いまざとライナー時刻案内</title>
+        <style id="startup-pointer-hide">html, html * { cursor: none !important; }</style>
         <link rel="stylesheet" href="style/style.css" />
         <link rel="stylesheet" href="style/imazato-liner.css" />
     </head>
@@ -117,17 +118,24 @@
                 </section>
             </section>
 
-            <aside class="time-signal-control-panel" aria-label="時報操作">
+            <aside class="time-signal-control-panel" aria-label="システム操作">
                 <div class="time-signal-control-inner">
                     <button id="time-signal-toggle" class="time-signal-toggle" type="button">時報停止</button>
-                    <button id="display-power-off-toggle" class="display-power-off-toggle" type="button">画面消灯</button>
                     <div id="time-signal-status" class="time-signal-status">時報制御を確認中</div>
+                    <button id="network-status-toggle" class="network-status-toggle" type="button">ネットワーク<br>状態表示</button>
+                    <div class="system-control-spacer"></div>
+                    <button id="display-power-off-toggle" class="display-power-off-toggle" type="button">画面消灯</button>
+                    <button id="system-restart-toggle" class="system-restart-toggle" type="button">再起動</button>
                     <div id="time-signal-menu" class="time-signal-menu" hidden></div>
+                    <div id="network-dashboard-modal" class="network-dashboard-modal" hidden></div>
+                    <div id="restart-confirm-modal" class="restart-confirm-modal" hidden></div>
                 </div>
             </aside>        </main>
 
         <script src="app/pointer-visibility.js"></script>
         <script src="app/imazato-liner.js"></script>
         <script src="app/time-signal-control.js"></script>
+        <script src="app/system-control.js"></script>
     </body>
 </html>
+

@@ -92,13 +92,92 @@ $excludeRootNames = @(
     ".git",
     "_update",
     "temp",
-    "monitor_css"
+    "monitor_css",
+    "document"
 )
 
-$sourceItems = Get-ChildItem -LiteralPath $projectDir -Force |
-    Where-Object { $excludeRootNames -notcontains $_.Name }
+$excludeZipEntryPrefixes = @(
+    "database/runtime/"
+)
 
-Compress-Archive -Path $sourceItems.FullName -DestinationPath $zipPath -Force
+$excludeZipEntryNames = @(
+    "bin/update_config.json"
+)
+
+function Remove-ExcludedZipEntries {
+    param([string]$Path)
+
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $zip = [System.IO.Compression.ZipFile]::Open($Path, [System.IO.Compression.ZipArchiveMode]::Update)
+    try {
+        $entriesToDelete = New-Object System.Collections.ArrayList
+        foreach ($entry in @($zip.Entries)) {
+            $entryName = $entry.FullName.Replace("\", "/")
+            $isExcluded = $false
+
+            foreach ($prefix in $excludeZipEntryPrefixes) {
+                if ($entryName.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                    $isExcluded = $true
+                    break
+                }
+            }
+
+            if (-not $isExcluded) {
+                foreach ($name in $excludeZipEntryNames) {
+                    if ($entryName.Equals($name, [System.StringComparison]::OrdinalIgnoreCase)) {
+                        $isExcluded = $true
+                        break
+                    }
+                }
+            }
+
+            if (-not $isExcluded -and $entryName -like 'document/~$*') {
+                $isExcluded = $true
+            }
+
+            if ($isExcluded) {
+                [void]$entriesToDelete.Add($entry)
+            }
+        }
+
+        foreach ($entry in @($entriesToDelete)) {
+            $entry.Delete()
+        }
+    }
+    finally {
+        $zip.Dispose()
+    }
+}
+
+$stagingDir = Join-Path $updateRoot ("staging_" + $timestamp)
+Ensure-Directory $stagingDir
+
+$robocopyArgs = @(
+    $projectDir,
+    $stagingDir,
+    "/E",
+    "/COPY:DAT",
+    "/DCOPY:DAT",
+    "/R:1",
+    "/W:1",
+    "/XD",
+    (Join-Path $projectDir ".git"),
+    (Join-Path $projectDir "_update"),
+    (Join-Path $projectDir "temp"),
+    (Join-Path $projectDir "monitor_css"),
+    (Join-Path $projectDir "document"),
+    (Join-Path $projectDir "database\runtime"),
+    "/XF",
+    (Join-Path $projectDir "bin\update_config.json")
+)
+& robocopy.exe @robocopyArgs | Out-Null
+if ($LASTEXITCODE -gt 7) {
+    throw "更新パッケージ用ファイルコピーに失敗しました。robocopy exit code: $LASTEXITCODE"
+}
+
+Compress-Archive -Path (Join-Path $stagingDir "*") -DestinationPath $zipPath -Force
+Remove-Item -LiteralPath $stagingDir -Recurse -Force
+Remove-ExcludedZipEntries -Path $zipPath
 
 $hash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash
 $manifest = [ordered]@{

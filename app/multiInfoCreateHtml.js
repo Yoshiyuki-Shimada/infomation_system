@@ -67,97 +67,100 @@ function createEvacuationHtml(bg, ev) {
  */
 function createWeatherWarningHtml(warningData) {
     const warningNames = {
-        "02": "暴風雪警報",
-        "03": "大雨警報",
-        "04": "洪水警報",
-        "05": "暴風警報",
-        "06": "大雪警報",
-        "07": "波浪警報",
-        "08": "高潮警報",
-        10: "大雨注意報",
-        12: "大雪注意報",
-        13: "風雪注意報",
-        14: "雷注意報",
-        15: "強風注意報",
-        16: "波浪注意報",
-        17: "融雪注意報",
-        18: "洪水注意報",
-        19: "高潮注意報",
-        20: "濃霧注意報",
-        21: "乾燥注意報",
-        22: "なだれ注意報",
-        23: "低温注意報",
-        24: "霜注意報",
-        25: "着氷注意報",
-        26: "着雪注意報",
-        32: "暴風雪特別警報",
-        33: "大雨特別警報",
-        35: "暴風特別警報",
-        36: "大雪特別警報",
-        37: "波浪特別警報",
-        38: "高潮特別警報",
-    };
-    Object.assign(warningNames, {
-        "02": "暴風雪警報", "03": "大雨警報", "04": "氾濫警報",
-        "05": "暴風警報", "06": "大雪警報", "07": "波浪警報",
-        "08": "高潮警報", "09": "土砂災害警報",
-        "10": "大雨注意報", "12": "大雪注意報", "13": "風雪注意報",
-        "14": "雷注意報", "15": "強風注意報", "16": "波浪注意報",
-        "17": "融雪注意報", "18": "氾濫注意報", "19": "高潮注意報",
-        "20": "濃霧注意報", "21": "乾燥注意報", "22": "なだれ注意報",
-        "23": "低温注意報", "24": "霜注意報", "25": "着氷注意報",
-        "26": "着雪注意報", "27": "その他の注意報",
-        "29": "土砂災害注意報",
-        "32": "暴風雪特別警報", "33": "大雨特別警報",
-        "34": "氾濫特別警報", "35": "暴風特別警報",
-        "36": "大雪特別警報", "37": "波浪特別警報",
-        "38": "高潮特別警報", "39": "土砂災害特別警報",
-        "43": "大雨危険警報", "44": "氾濫危険警報",
+        "02": "暴風雪警報", "03": "大雨警報", "04": "氾濫警報", "05": "暴風警報",
+        "06": "大雪警報", "07": "波浪警報", "08": "高潮警報", "09": "土砂災害警報",
+        "10": "大雨注意報", "12": "大雪注意報", "13": "風雪注意報", "14": "雷注意報",
+        "15": "強風注意報", "16": "波浪注意報", "17": "融雪注意報", "18": "氾濫注意報",
+        "19": "高潮注意報", "20": "濃霧注意報", "21": "乾燥注意報", "22": "なだれ注意報",
+        "23": "低温注意報", "24": "霜注意報", "25": "着氷注意報", "26": "着雪注意報",
+        "27": "その他の注意報", "29": "土砂災害注意報", "32": "暴風雪特別警報",
+        "33": "大雨特別警報", "34": "氾濫特別警報", "35": "暴風特別警報",
+        "36": "大雪特別警報", "37": "波浪特別警報", "38": "高潮特別警報",
+        "39": "土砂災害特別警報", "43": "大雨危険警報", "44": "氾濫危険警報",
         "48": "高潮危険警報", "49": "土砂災害危険警報",
-    });
-    const getWarningLevel = (code) => {
-        const number = Number(code);
-        if (number >= 32 && number <= 39) return "special";
-        if (number >= 40) return "danger";
-        if (number >= 2 && number <= 9) return "warning";
-        return "advisory";
     };
-    const warningItems = warningData.warnings
-        .map((warning) => {
-            const code = String(warning.code).padStart(2, "0");
-            const level = getWarningLevel(code);
-            const name = warningNames[code] || `気象情報（${code}）`;
 
-            return `
-                <div class="weather-warning-item weather-warning-${level}">
-                    <div class="weather-warning-name">${name}</div>
-                    <div class="weather-warning-status">${warning.status || "発表中"}</div>
-                </div>
-            `;
-        })
-        .join("");
-    const reportDate = warningData.reportDatetime
-        ? new Date(warningData.reportDatetime)
-        : null;
-    const reportTime =
-        reportDate && !Number.isNaN(reportDate.getTime())
-            ? `${String(reportDate.getHours()).padStart(2, "0")}:${String(reportDate.getMinutes()).padStart(2, "0")}発表`
-            : "";
+    const getWarningLevelInfo = (code) => {
+        const number = Number(code);
+        if (number >= 32 && number <= 39) return { key: "special", number: 5, label: "特別警報" };
+        if (number >= 40) return { key: "danger", number: 4, label: "危険警報" };
+        if (number >= 2 && number <= 9) return { key: "warning", number: 3, label: "警報" };
+        return { key: "advisory", number: 2, label: "注意報" };
+    };
+
+    const getWarningBaseName = (name, levelInfo) => {
+        const sourceName = String(name || "");
+        const levelSuffix = new RegExp(`${levelInfo.label}$`);
+        return sourceName.replace(levelSuffix, "");
+    };
+
+    const formatWarningReportDatetime = (value) => {
+        if (!value) return "";
+
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return "";
+
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, "0");
+        const day = String(date.getDate()).padStart(2, "0");
+        const hour = String(date.getHours()).padStart(2, "0");
+        const minute = String(date.getMinutes()).padStart(2, "0");
+        return `${year}/${month}/${day} ${hour}:${minute}`;
+    };
+
+    const getWarningSortRank = (warning) => {
+        const code = Number(warning.code || 0);
+        if (String(warning.status || "").includes("解除")) return 4;
+        if (code >= 32 && code <= 39) return 0;
+        if (code >= 40) return 1;
+        if (code >= 2 && code <= 9) return 2;
+        return 3;
+    };
+
+    const warnings = (Array.isArray(warningData?.warnings) ? warningData.warnings : [])
+        .slice()
+        .sort((left, right) => getWarningSortRank(left) - getWarningSortRank(right));
+    const warningCards = warnings.map((warning) => {
+        const code = String(warning.code || "");
+        const levelInfo = getWarningLevelInfo(code);
+        const sourceName = warning.name || warningNames[code] || "気象情報";
+        const warningName = getWarningBaseName(sourceName, levelInfo);
+        const isReleased = String(warning.status || "").includes("解除");
+        const title = isReleased
+            ? `以下の【レベル${levelInfo.number}】${levelInfo.label}は解除`
+            : `【レベル${levelInfo.number}】${levelInfo.label}`;
+        const statusText = isReleased ? "解除" : (warning.status || "発表");
+        const reportDatetime = formatWarningReportDatetime(warningData.reportDatetime);
+        const status = reportDatetime
+            ? `${statusText}（${reportDatetime}）`
+            : statusText;
+        const cardClass = isReleased ? "weather-warning-released" : `weather-warning-${levelInfo.key}`;
+
+        return `
+            <div class="weather-warning-item ${cardClass}">
+                <div class="weather-warning-level">${title}</div>
+                <div class="weather-warning-name">${warningName}</div>
+                <div class="weather-warning-status">${status}</div>
+            </div>
+        `;
+    }).join("");
+
+    const content = warningCards || `
+        <div class="weather-warning-empty">警報・注意報は発表されていません。</div>
+    `;
 
     return `
         <div class="slide weather-warning-slide">
-            <div class="slide-title">気象警報・注意報（大阪市）</div>
+            <div class="slide-title">気象警報・注意報（${warningData.areaName || "大阪市"}）</div>
             <div class="slide-content">
-                <div class="weather-warning-report-time">${reportTime}</div>
-                <div class="weather-warning-list">
-                    ${warningItems}
+                <div class="weather-warning-list ${warnings.length ? "" : "weather-warning-list-empty"}">
+                    ${content}
                 </div>
                 <div class="weather-warning-source">気象庁発表</div>
             </div>
         </div>
     `;
 }
-
 /**
  * 運行情報の概要のHTMLを生成
  * @param {*} formattedSections 影響区間・
@@ -165,18 +168,48 @@ function createWeatherWarningHtml(warningData) {
  * @param {*} resumeStr 運転再開見込み
  * @returns 生成後のHTML
  */
-function createRailwayInfoOverviewHtml(formattedSections, causeStr, resumeStr) {
+function createRailwayDetailItemHtml(label, content) {
+    if (!content) return "";
+
     return `
-        <div class="railway-detail-list">
-            <div class="railway-detail-item">
-                <div class="railway-detail-label">影響区間</div>
-                <div class="railway-detail-content">
-                    ${formattedSections}
-                </div>
+        <div class="railway-detail-item">
+            <div class="railway-detail-label">${label}</div>
+            <div class="railway-detail-content">
+                ${content}
             </div>
-            ${causeStr ? causeStrHtml(causeStr) : ""}
-            ${resumeStr ? resumeStrHtml(resumeStr) : ""}
-        </div>`;
+        </div>
+    `;
+}
+
+function createRailwayDetailListHtml(items, extraClass = "") {
+    const detailItems = items
+        .filter((item) => item && item.content)
+        .map((item) => createRailwayDetailItemHtml(item.label, item.content))
+        .join("");
+    if (!detailItems) return "";
+
+    const className = `railway-detail-list${extraClass ? ` ${extraClass}` : ""}`;
+    return `<div class="${className}">${detailItems}</div>`;
+}
+
+function createRailwayInfoOverviewHtml(
+    formattedSections,
+    causeStr,
+    resumeStr,
+    showSections = true,
+) {
+    const detailItems = [];
+    if (showSections && formattedSections) {
+        detailItems.push({ label: "影響区間", content: formattedSections });
+    }
+    if (causeStr) {
+        detailItems.push({ label: "原因", content: causeStr });
+    }
+    if (resumeStr) {
+        detailItems.push({ label: "運転再開見込み", content: resumeStr });
+    }
+
+    return createRailwayDetailListHtml(detailItems);
 }
 
 /**
@@ -185,14 +218,7 @@ function createRailwayInfoOverviewHtml(formattedSections, causeStr, resumeStr) {
  * @returns 生成後のHTML
  */
 function causeStrHtml(causeStr) {
-    return `
-        <div class="railway-detail-item">
-            <div class="railway-detail-label">原因</div>
-            <div class="railway-detail-content">
-                ${causeStr}
-            </div>
-        </div>
-    `;
+    return createRailwayDetailItemHtml("原因", causeStr);
 }
 
 /**
@@ -201,14 +227,33 @@ function causeStrHtml(causeStr) {
  * @returns 生成後のHTML
  */
 function resumeStrHtml(resumeStr) {
-    return `
-        <div class="railway-detail-item">
-            <div class="railway-detail-label">運転再開見込み</div>
-            <div class="railway-detail-content">
-                ${resumeStr}
-            </div>
-        </div>
-    `;
+    return createRailwayDetailItemHtml("運転再開見込み", resumeStr);
+}
+
+function formatRailwayMainBodyHtml(chunk) {
+    const source = String(chunk || "");
+    const marker = "対象列車\n";
+    const markerIndex = source.indexOf(marker);
+    if (markerIndex < 0) {
+        return source.replace(/\n/g, "<br>");
+    }
+
+    const bodyText = source.slice(0, markerIndex).trimEnd();
+    const targetTrainText = source.slice(markerIndex + marker.length).trim();
+    const bodyHtml = bodyText.replace(/\n/g, "<br>");
+    const targetTrainHtml = createRailwayDetailListHtml(
+        [
+            {
+                label: "対象列車",
+                content: targetTrainText.replace(/\n/g, "<br>"),
+            },
+        ],
+        "railway-main-detail-list",
+    );
+
+    if (!bodyHtml) return targetTrainHtml;
+    if (!targetTrainHtml) return bodyHtml;
+    return `${bodyHtml}<br><br>${targetTrainHtml}`;
 }
 
 /**
@@ -271,7 +316,7 @@ function createRailwayInfoBodyHtml(
                     <div class="auto-scroll-viewport railway-body-viewport">
                         <div class="auto-scroll-content railway-body-scroll">
                             <div class="railway-main-body">
-                                ${chunk.replace(/\n/g, "<br>")}
+                                ${formatRailwayMainBodyHtml(chunk)}
                             </div>
                         </div>
                     </div>
@@ -290,7 +335,7 @@ function createRailwayInfoBodyHtml(
                     ${railwayHeaderHtml}
 
                     <div class="railway-main-body">
-                        ${chunk.replace(/\n/g, "<br>")}
+                        ${formatRailwayMainBodyHtml(chunk)}
                     </div>
                     ${fixedBottomHtml}
                 </div>
@@ -687,6 +732,33 @@ function createWeeklyWeatherHtml(weeklyWeather) {
         if (code >= 400 && code < 500) return "雪";
         return "情報なし";
     };
+    const getJmaWeeklyWeatherIconCode = (code) => {
+        const exactIconCodes = new Set([
+            100, 101, 102, 104, 105, 110, 111, 112, 115, 200, 201, 202,
+            204, 205, 210, 211, 212, 215, 300, 301, 302, 303, 308, 311,
+            313, 314, 400, 401, 402, 403, 406, 411, 413, 414,
+        ]);
+        if (exactIconCodes.has(code)) return code;
+
+        const fallbackIconCodes = {};
+        fallbackIconCodes[103] = 102;
+        fallbackIconCodes[113] = 112;
+        fallbackIconCodes[114] = 112;
+        fallbackIconCodes[116] = 115;
+        fallbackIconCodes[117] = 115;
+        fallbackIconCodes[203] = 202;
+        fallbackIconCodes[213] = 212;
+        fallbackIconCodes[214] = 212;
+        fallbackIconCodes[216] = 215;
+        fallbackIconCodes[217] = 215;
+        if (fallbackIconCodes[code]) return fallbackIconCodes[code];
+
+        if (code >= 100 && code < 200) return 100;
+        if (code >= 200 && code < 300) return 200;
+        if (code >= 300 && code < 400) return 300;
+        if (code >= 400 && code < 500) return 400;
+        return 200;
+    };
 
     const items = weeklyWeather.days
         .map((forecast) => {
@@ -717,7 +789,7 @@ function createWeeklyWeatherHtml(weeklyWeather) {
                 <div class="weather_weekly_item">
                     <div class="weather_weekly_date">${dateText}</div>
                     <img
-                        src="https://www.jma.go.jp/bosai/forecast/img/${forecast.weatherCode}.svg"
+                        src="https://www.jma.go.jp/bosai/forecast/img/${getJmaWeeklyWeatherIconCode(code)}.svg"
                         class="weather_weekly_icon"
                         alt="${weatherName}"
                     >

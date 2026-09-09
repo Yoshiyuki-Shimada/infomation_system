@@ -337,7 +337,7 @@ function importEvacuationData() {
  */
 function importWeatherWarningData() {
     const warningData = signageData.weatherWarnings;
-    if (!warningData?.warnings?.length) return;
+    if (!warningData) return;
 
     const decodeJmaStatus = (status) => {
         const value = String(status || "");
@@ -352,22 +352,16 @@ function importWeatherWarningData() {
             return value;
         }
     };
-    const activeWarnings = warningData.warnings
-        .map((warning) => ({
-            ...warning,
-            status: decodeJmaStatus(warning.status),
-        }))
-        .filter(
-            (warning) =>
-                warning.status !== "解除" &&
-                !warning.status.includes("発表警報・注意報はなし"),
-        );
-    if (!activeWarnings.length) return;
+
+    const warnings = (warningData.warnings || []).map((warning) => ({
+        ...warning,
+        status: decodeJmaStatus(warning.status),
+    }));
 
     emergencyList.push(
         createWeatherWarningHtml({
             ...warningData,
-            warnings: activeWarnings,
+            warnings,
         }),
     );
 }
@@ -396,8 +390,11 @@ function importRailwayInfoData() {
 
             console.log(r.lineCode);
 
+            const isLimitedExpress =
+                r.limitedExpress === true || /^特急/.test(String(r.name || ""));
+
             if (r.lineCode == TRAIN_COMPANY.JR_WEST) {
-                const parts = r.msg.split(" 【");
+                const parts = String(r.msg || "").split(" 【");
                 const causeStr =
                     parts
                         .find(
@@ -417,26 +414,34 @@ function importRailwayInfoData() {
                         )
                         ?.replace(/.*】/, "") || "";
 
-                // 影響区間のデータを整形して保管
-                const formattedSections = parts[0]
-                    .split(" / ")
-                    .map((s) => {
-                        const m = s.match(/(.*?)（(.*?)）/);
-                        const icon = getLineSymbolHtml(r.name, s, r.lineCode); // アイコン取得
-                        const lineTitle = `<div class="line_name">${icon}<strong>${r.name}</strong></div>`;
-                        return m
-                            ? `${lineTitle}【${m[2]}】  ${m[1]}`
-                            : `${lineTitle}${s}`;
-                    })
-                    .join("<br>");
+                if (isLimitedExpress) {
+                    fixedBottomHtml = createRailwayInfoOverviewHtml(
+                        "",
+                        causeStr,
+                        resumeStr,
+                        false,
+                    );
+                } else {
+                    // 影響区間のデータを整形して保管
+                    const formattedSections = parts[0]
+                        .split(" / ")
+                        .map((s) => {
+                            const m = s.match(/(.*?)（(.*?)）/);
+                            const icon = getLineSymbolHtml(r.name, s, r.lineCode); // アイコン取得
+                            const lineTitle = `<div class="line_name">${icon}<strong>${r.name}</strong></div>`;
+                            return m
+                                ? `${lineTitle}【${m[2]}】  ${m[1]}`
+                                : `${lineTitle}${s}`;
+                        })
+                        .join("<br>");
 
-                // 影響区間・運転再開見込み・事象発生原因の項目
-                fixedBottomHtml = createRailwayInfoOverviewHtml(
-                    formattedSections,
-                    causeStr,
-                    resumeStr,
-                );
-
+                    // 影響区間・運転再開見込み・事象発生原因の項目
+                    fixedBottomHtml = createRailwayInfoOverviewHtml(
+                        formattedSections,
+                        causeStr,
+                        resumeStr,
+                    );
+                }
             }
 
             railwayList.push(
@@ -1004,3 +1009,5 @@ function fetchNewData() {
 
     document.body.appendChild(script);
 }
+
+
