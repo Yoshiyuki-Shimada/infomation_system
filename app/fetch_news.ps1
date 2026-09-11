@@ -5,7 +5,6 @@
 $parentDir = Split-Path -Path $PSScriptRoot -Parent
 $tempDir = Join-Path -Path $parentDir -ChildPath "temp"
 $filePath = Join-Path -Path $tempDir -ChildPath "news_data.js"
-
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
@@ -264,22 +263,26 @@ while ($true) {
                 foreach ($kind in @($item.kinds)) {
                     $status = [string]$kind.status
                     $code = [string]$kind.code
-                    if ([string]::IsNullOrWhiteSpace($code)) {
+                    if ([string]::IsNullOrWhiteSpace($code) -or $status -match "解除") {
                         continue
                     }
 
-                    if (-not $osakaCityWarningsByCode.Contains($code)) {
-                        $osakaCityWarningsByCode[$code] = @{
-                            code = $code
-                            status = $status
-                        }
+                    $warningItem = @{
+                        code = $code
+                        name = [string]$kind.name
+                        status = $status
+                        reportDatetime = [string]$report.reportDatetime
                     }
                     if ([string]::IsNullOrWhiteSpace($warningReportDatetime)) {
                         $warningReportDatetime = [string]$report.reportDatetime
                     }
+                    if (-not $osakaCityWarningsByCode.Contains($code)) {
+                        $osakaCityWarningsByCode[$code] = $warningItem
+                    }
                 }
             }
         }
+
         $osakaCityWarnings = @($osakaCityWarningsByCode.Values)
 
         $data.weatherWarnings = @{
