@@ -130,7 +130,7 @@ function createWeatherWarningHtml(warningData) {
             ? `以下の【レベル${levelInfo.number}】${levelInfo.label}は解除`
             : `【レベル${levelInfo.number}】${levelInfo.label}`;
         const statusText = isReleased ? "解除" : (warning.status || "発表");
-        const reportDatetime = formatWarningReportDatetime(warningData.reportDatetime);
+        const reportDatetime = formatWarningReportDatetime(warning.reportDatetime || warningData.reportDatetime);
         const status = reportDatetime
             ? `${statusText}（${reportDatetime}）`
             : statusText;

@@ -635,13 +635,9 @@ function getImazatoLinerRemovalSeconds(bus, now) {
     return getSecondsUntilImazatoLiner(getImazatoLinerDisplayBaseTime(bus, now), now);
 }
 
-function getImazatoLinerTimetableFallbackStatus(bus, cycleSeconds) {
+function getImazatoLinerTimetableFallbackStatus(bus) {
     if (bus.timetableFlg !== true || bus.onlineFlg === true) {
         return null;
-    }
-
-    if (bus.lastFlg && cycleSeconds >= 6) {
-        return { text: "最終", color: "#e02135" };
     }
 
     return { text: "運行情報未取得", color: "#8c8f93" };
@@ -669,48 +665,44 @@ function getImazatoLinerRemainingInfo(bus, now = new Date()) {
 
 function getImazatoLinerRowStatuses(bus, now = new Date()) {
     const cycleSeconds = Math.floor(Date.now() / 1000) % 12;
-    const fallbackStatus = getImazatoLinerTimetableFallbackStatus(
-        bus,
-        cycleSeconds,
-    );
+    const fallbackStatus = getImazatoLinerTimetableFallbackStatus(bus);
     const remainingInfo = getImazatoLinerRemainingInfo(bus, now);
-
-    if (bus.suspensionFlg) {
-        return {
-            operation: { text: "運休", color: "#e02135" },
-            progress: null,
-        };
-    }
-
-    let operationStatus = fallbackStatus;
     const delayEstimateInfo = Number(bus.delayEstimateMinutes) >= 5
         ? {
               text: `約${bus.delayEstimateMinutes}分遅れ見込み`,
               color: "#e02135",
           }
         : null;
-
-    if (!operationStatus && delayEstimateInfo) {
-        operationStatus = delayEstimateInfo;
-    }
-
-    if (!operationStatus && isImazatoLinerStartDepartureUndetected(bus, now)) {
-        operationStatus = { text: "始発発車未検知", color: "#e02135" };
-    }
-
-    if (!operationStatus && Number(bus.delayMinutes) >= 3) {
-        operationStatus = { text: `約${bus.delayMinutes}分遅れ`, color: "#e02135" };
-    }
-
-    if (!operationStatus && bus.lastFlg) {
-        operationStatus = { text: "最終", color: "#e02135" };
-    }
+    const startDepartureStatus = isImazatoLinerStartDepartureUndetected(bus, now)
+        ? { text: "始発発車未検知", color: "#e02135" }
+        : null;
+    const delayStatus = Number(bus.delayMinutes) >= 3
+        ? { text: `約${bus.delayMinutes}分遅れ`, color: "#e02135" }
+        : null;
+    const suspensionStatus = bus.suspensionFlg
+        ? { text: "運休", color: "#e02135" }
+        : null;
+    const lastStatus = bus.lastFlg
+        ? { text: "最終", color: "#e02135" }
+        : null;
+    const serviceStatus =
+        suspensionStatus ||
+        fallbackStatus ||
+        delayEstimateInfo ||
+        startDepartureStatus ||
+        delayStatus;
+    const operationStatus = lastStatus && serviceStatus
+        ? cycleSeconds < 6
+            ? lastStatus
+            : serviceStatus
+        : serviceStatus || lastStatus;
 
     return {
         operation: operationStatus,
-        progress: remainingInfo,
+        progress: bus.suspensionFlg ? null : remainingInfo,
     };
-}function createImazatoLinerRow(bus, now = new Date()) {
+}
+function createImazatoLinerRow(bus, now = new Date()) {
     const destinationInfo = getImazatoLinerDestinationInfo(bus.destination);
     const statuses = getImazatoLinerRowStatuses(bus, now);
     const guideMode = Math.floor(Date.now() / 8000) % 3;
@@ -747,7 +739,7 @@ function isImazatoLinerPagingTarget(bus, now) {
     const displayTime = getImazatoLinerDisplayBaseTime(bus, now);
     const displaySeconds = getSecondsUntilImazatoLiner(displayTime, now);
 
-    return scheduledSeconds <= 1500 || displaySeconds <= 1500;
+    return scheduledSeconds <= 1800 || displaySeconds <= 1800;
 }
 
 function getImazatoLinerPagingWindow(activeBuses, now) {
@@ -885,12 +877,13 @@ function createImazatoLinerGuideItemElement(stopKey, bus) {
     return itemElement;
 }
 
-function getImazatoLinerGuideTargetBus(stopKey, buses, now) {
+function getImazatoLinerGuideTargetBuses(stopKey, buses, now) {
     return [...buses]
         .filter((bus) => getImazatoLinerGuideData(stopKey, bus))
         .filter((bus) => {
-            const guideTime = getImazatoLinerDisplayBaseTime(bus, now);
-            return getSecondsUntilImazatoLiner(guideTime, now) > 480;
+            const scheduledSeconds = getSecondsUntilImazatoLiner(bus.time, now);
+            const removalSeconds = getImazatoLinerRemovalSeconds(bus, now);
+            return scheduledSeconds <= 1800 && removalSeconds >= 175;
         })
         .sort((a, b) => {
             const aTime = getImazatoLinerDisplayBaseTime(a, now);
@@ -899,15 +892,18 @@ function getImazatoLinerGuideTargetBus(stopKey, buses, now) {
                 getSecondsUntilImazatoLiner(aTime, now) -
                 getSecondsUntilImazatoLiner(bTime, now)
             );
-        })[0];
+        });
 }
 
 function updateImazatoLinerGuide(elementId, stopKey, buses, now) {
     const guideElement = document.getElementById(elementId);
     if (!guideElement) return;
 
-    const guideBus = getImazatoLinerGuideTargetBus(stopKey, buses, now);
-    const guideText = guideBus ? createImazatoLinerGuideText(stopKey, guideBus) : "";
+    const guideBuses = getImazatoLinerGuideTargetBuses(stopKey, buses, now);
+    const guideText = guideBuses
+        .map((bus) => createImazatoLinerGuideText(stopKey, bus))
+        .filter(Boolean)
+        .join("　　　");
 
     if (!guideText) {
         guideElement.dataset.guideText = "";
@@ -924,10 +920,15 @@ function updateImazatoLinerGuide(elementId, stopKey, buses, now) {
 
     const trackElement = document.createElement("div");
     trackElement.className = "transfer-guide-track";
-    const itemElement = createImazatoLinerGuideItemElement(stopKey, guideBus);
-    if (itemElement) {
-        trackElement.appendChild(itemElement);
-    }
+    guideBuses.forEach((bus, index) => {
+        if (index > 0) {
+            trackElement.appendChild(document.createTextNode("　　　"));
+        }
+        const itemElement = createImazatoLinerGuideItemElement(stopKey, bus);
+        if (itemElement) {
+            trackElement.appendChild(itemElement);
+        }
+    });
     guideElement.appendChild(trackElement);
 
     requestAnimationFrame(() => {

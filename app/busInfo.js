@@ -414,8 +414,6 @@ function pickBusDisplayInfo(
     suspensionInfo,
     fallbackInfo,
 ) {
-    if (suspensionInfo) return suspensionInfo;
-
     const statusInfos = [
         statusInfo,
         lastInfo,
@@ -433,7 +431,7 @@ function pickBusDisplayInfo(
     }
 
     if (statusInfos.length === 2) {
-        return cycleSeconds < 9 ? statusInfos[0] : statusInfos[1];
+        return cycleSeconds < 6 ? statusInfos[0] : statusInfos[1];
     }
     if (statusInfos.length > 2) {
         const statusIndex = Math.min(
@@ -450,11 +448,8 @@ function getTimetableFallbackStatus(bus, cycleSeconds) {
         return null;
     }
 
-    if (bus.lastFlg && cycleSeconds >= 6) {
-        return { text: "最終", color: "#e02135" };
-    }
-
     return { text: "運行情報未取得", color: "#8c8f93" };
+
 }
 
 function isBusPagingTarget(bus, now, opDate) {
@@ -463,7 +458,7 @@ function isBusPagingTarget(bus, now, opDate) {
     const scheduledSeconds = calculateDiff(bus.time, now, opDate).pure_seconds;
     const removalSeconds = calculateRemovalDiff(bus, now, opDate).pure_seconds;
 
-    return scheduledSeconds <= 900 || removalSeconds <= 900;
+    return scheduledSeconds <= 1200 || removalSeconds <= 1200;
 }
 
 function getBusPagingWindow(activeUpcoming, now, opDate, maxDisplay) {
@@ -581,7 +576,7 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
         return [];
     }
 
-    const engMode = Math.floor(Date.now() / 8000) % 6;
+    const engMode = Math.floor(Date.now() / 8000) % 3;
     const cycleSeconds = Math.floor(now.getTime() / 1000) % 12;
     let engText = "";
 
@@ -838,7 +833,7 @@ function isTransferGuideTarget(bus, now, opDate) {
     const scheduledSeconds = calculateDiff(bus.time, now, opDate).pure_seconds;
     const removalSeconds = calculateRemovalDiff(bus, now, opDate).pure_seconds;
 
-    return scheduledSeconds <= 900 && removalSeconds >= 175;
+    return scheduledSeconds <= 1200 && removalSeconds >= 175;
 }
 
 function getTransferGuideTargetBuses(displayedBuses, now, opDate) {
