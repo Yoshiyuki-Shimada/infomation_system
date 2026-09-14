@@ -792,6 +792,7 @@ function createImazatoLinerRow(bus, now = new Date()) {
         </div>
     `;
 }
+// 定刻前は30分以内だけをページングし、定刻後の遅延便は情報が消えるまで残す。
 function isImazatoLinerPagingTarget(bus, now) {
     const scheduledSeconds = getSecondsUntilImazatoLiner(bus.time, now);
     if (scheduledSeconds >= 0) return scheduledSeconds <= 1800;
@@ -1113,22 +1114,22 @@ function refreshImazatoLinerDisplay() {
             : `● オンラインデータ（${updateTime}更新・${pollSeconds}秒間隔更新）`;
     });
 
-    const displayedOikebashiNorth = renderImazatoLinerList(
+    renderImazatoLinerList(
         "list-oikebashi-north",
         schedule.oikebashiNorth,
         now,
     );
-    const displayedOikebashiSouth = renderImazatoLinerList(
+    renderImazatoLinerList(
         "list-oikebashi-south",
         schedule.oikebashiSouth,
         now,
     );
-    const displayedTajimaNorth = renderImazatoLinerList(
+    renderImazatoLinerList(
         "list-tajima-north",
         schedule.tajimaNorth,
         now,
     );
-    const displayedTajimaSouth = renderImazatoLinerList(
+    renderImazatoLinerList(
         "list-tajima-south",
         schedule.tajimaSouth,
         now,

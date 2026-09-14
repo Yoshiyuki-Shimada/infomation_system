@@ -63,28 +63,63 @@ function createEvacuationHtml(bg, ev) {
 /**
  * 大阪市の気象警報・注意報HTMLを生成
  * @param {*} warningData
- * @returns 生成後のHTML
+ * @returns 生成後のHTML一覧
  */
-function createWeatherWarningHtml(warningData) {
+const WEATHER_WARNING_CARDS_PER_SLIDE = 10;
+
+function createWeatherWarningSlidesHtml(warningData) {
     const warningNames = {
-        "02": "暴風雪警報", "03": "大雨警報", "04": "氾濫警報", "05": "暴風警報",
-        "06": "大雪警報", "07": "波浪警報", "08": "高潮警報", "09": "土砂災害警報",
-        "10": "大雨注意報", "12": "大雪注意報", "13": "風雪注意報", "14": "雷注意報",
-        "15": "強風注意報", "16": "波浪注意報", "17": "融雪注意報", "18": "氾濫注意報",
-        "19": "高潮注意報", "20": "濃霧注意報", "21": "乾燥注意報", "22": "なだれ注意報",
-        "23": "低温注意報", "24": "霜注意報", "25": "着氷注意報", "26": "着雪注意報",
-        "27": "その他の注意報", "29": "土砂災害注意報", "32": "暴風雪特別警報",
-        "33": "大雨特別警報", "34": "氾濫特別警報", "35": "暴風特別警報",
-        "36": "大雪特別警報", "37": "波浪特別警報", "38": "高潮特別警報",
-        "39": "土砂災害特別警報", "43": "大雨危険警報", "44": "氾濫危険警報",
-        "48": "高潮危険警報", "49": "土砂災害危険警報",
+        "02": "暴風雪警報",
+        "03": "大雨警報",
+        "04": "氾濫警報",
+        "05": "暴風警報",
+        "06": "大雪警報",
+        "07": "波浪警報",
+        "08": "高潮警報",
+        "09": "土砂災害警報",
+        "10": "大雨注意報",
+        "12": "大雪注意報",
+        "13": "風雪注意報",
+        "14": "雷注意報",
+        "15": "強風注意報",
+        "16": "波浪注意報",
+        "17": "融雪注意報",
+        "18": "氾濫注意報",
+        "19": "高潮注意報",
+        "20": "濃霧注意報",
+        "21": "乾燥注意報",
+        "22": "なだれ注意報",
+        "23": "低温注意報",
+        "24": "霜注意報",
+        "25": "着氷注意報",
+        "26": "着雪注意報",
+        "27": "その他の注意報",
+        "29": "土砂災害注意報",
+        "32": "暴風雪特別警報",
+        "33": "大雨特別警報",
+        "34": "氾濫特別警報",
+        "35": "暴風特別警報",
+        "36": "大雪特別警報",
+        "37": "波浪特別警報",
+        "38": "高潮特別警報",
+        "39": "土砂災害特別警報",
+        "43": "大雨危険警報",
+        "44": "氾濫危険警報",
+        "48": "高潮危険警報",
+        "49": "土砂災害危険警報",
     };
 
     const getWarningLevelInfo = (code) => {
         const number = Number(code);
-        if (number >= 32 && number <= 39) return { key: "special", number: 5, label: "特別警報" };
-        if (number >= 40) return { key: "danger", number: 4, label: "危険警報" };
-        if (number >= 2 && number <= 9) return { key: "warning", number: 3, label: "警報" };
+        if (number >= 32 && number <= 39) {
+            return { key: "special", number: 5, label: "特別警報" };
+        }
+        if (number >= 40) {
+            return { key: "danger", number: 4, label: "危険警報" };
+        }
+        if (number >= 2 && number <= 9) {
+            return { key: "warning", number: 3, label: "警報" };
+        }
         return { key: "advisory", number: 2, label: "注意報" };
     };
 
@@ -117,10 +152,7 @@ function createWeatherWarningHtml(warningData) {
         return 3;
     };
 
-    const warnings = (Array.isArray(warningData?.warnings) ? warningData.warnings : [])
-        .slice()
-        .sort((left, right) => getWarningSortRank(left) - getWarningSortRank(right));
-    const warningCards = warnings.map((warning) => {
+    const createWarningCardHtml = (warning) => {
         const code = String(warning.code || "");
         const levelInfo = getWarningLevelInfo(code);
         const sourceName = warning.name || warningNames[code] || "気象情報";
@@ -130,11 +162,15 @@ function createWeatherWarningHtml(warningData) {
             ? `以下の【レベル${levelInfo.number}】${levelInfo.label}は解除`
             : `【レベル${levelInfo.number}】${levelInfo.label}`;
         const statusText = isReleased ? "解除" : (warning.status || "発表");
-        const reportDatetime = formatWarningReportDatetime(warning.reportDatetime || warningData.reportDatetime);
+        const reportDatetime = formatWarningReportDatetime(
+            warning.reportDatetime || warningData.reportDatetime,
+        );
         const status = reportDatetime
             ? `${statusText}（${reportDatetime}）`
             : statusText;
-        const cardClass = isReleased ? "weather-warning-released" : `weather-warning-${levelInfo.key}`;
+        const cardClass = isReleased
+            ? "weather-warning-released"
+            : `weather-warning-${levelInfo.key}`;
 
         return `
             <div class="weather-warning-item ${cardClass}">
@@ -143,23 +179,58 @@ function createWeatherWarningHtml(warningData) {
                 <div class="weather-warning-status">${status}</div>
             </div>
         `;
-    }).join("");
+    };
 
-    const content = warningCards || `
-        <div class="weather-warning-empty">警報・注意報は発表されていません。</div>
-    `;
+    // 重大度順に並べ、特別警報・危険警報を最初のページから確認できるようにする。
+    const warnings = (
+        Array.isArray(warningData?.warnings) ? warningData.warnings : []
+    )
+        .slice()
+        .sort(
+            (left, right) =>
+                getWarningSortRank(left) - getWarningSortRank(right),
+        );
+    const pages = [];
 
-    return `
-        <div class="slide weather-warning-slide">
-            <div class="slide-title">気象警報・注意報（${warningData.areaName || "大阪市"}）</div>
-            <div class="slide-content">
-                <div class="weather-warning-list ${warnings.length ? "" : "weather-warning-list-empty"}">
-                    ${content}
+    if (warnings.length === 0) {
+        pages.push([]);
+    } else {
+        for (
+            let index = 0;
+            index < warnings.length;
+            index += WEATHER_WARNING_CARDS_PER_SLIDE
+        ) {
+            pages.push(
+                warnings.slice(
+                    index,
+                    index + WEATHER_WARNING_CARDS_PER_SLIDE,
+                ),
+            );
+        }
+    }
+
+    return pages.map((pageWarnings, pageIndex) => {
+        const warningCards = pageWarnings
+            .map((warning) => createWarningCardHtml(warning))
+            .join("");
+        const content = warningCards || `
+            <div class="weather-warning-empty">警報・注意報は発表されていません。</div>
+        `;
+        const pageLabel =
+            pages.length > 1 ? `（${pageIndex + 1}/${pages.length}）` : "";
+
+        return `
+            <div class="slide weather-warning-slide">
+                <div class="slide-title">気象警報・注意報（${warningData.areaName || "大阪市"}）${pageLabel}</div>
+                <div class="slide-content">
+                    <div class="weather-warning-list ${pageWarnings.length ? "" : "weather-warning-list-empty"}">
+                        ${content}
+                    </div>
+                    <div class="weather-warning-source">気象庁発表</div>
                 </div>
-                <div class="weather-warning-source">気象庁発表</div>
             </div>
-        </div>
-    `;
+        `;
+    });
 }
 /**
  * 運行情報の概要のHTMLを生成
@@ -212,24 +283,6 @@ function createRailwayInfoOverviewHtml(
     return createRailwayDetailListHtml(detailItems);
 }
 
-/**
- * 原因表示のHTMLを生成
- * @param {*} causeStr 原因
- * @returns 生成後のHTML
- */
-function causeStrHtml(causeStr) {
-    return createRailwayDetailItemHtml("原因", causeStr);
-}
-
-/**
- * 運転再開見込みのHTMLを生成
- * @param {*} resumeStr 運転再開見込み
- * @returns 生成後のHTML
- */
-function resumeStrHtml(resumeStr) {
-    return createRailwayDetailItemHtml("運転再開見込み", resumeStr);
-}
-
 function formatRailwayMainBodyHtml(chunk) {
     const source = String(chunk || "");
     const marker = "対象列車\n";
@@ -254,29 +307,6 @@ function formatRailwayMainBodyHtml(chunk) {
     if (!bodyHtml) return targetTrainHtml;
     if (!targetTrainHtml) return bodyHtml;
     return `${bodyHtml}<br><br>${targetTrainHtml}`;
-}
-
-/**
- * JR西日本・近畿エリアの現在の運行状況路線図スライドを生成
- * @param {*} routeMapUrl 路線図画像URL
- * @returns 生成後のHTML
- */
-function createJRWestRouteMapSlideHtml(routeMapUrl) {
-    return `
-        <div class="slide jr-west-route-map-slide">
-            <div class="slide-title">JR線の現在の運行情報</div>
-            <div class="slide-content">
-                <figure class="jr-west-route-map">
-                    <figcaption>近畿エリア路線図</figcaption>
-                    <img
-                        src="${routeMapUrl}"
-                        alt="JR西日本 近畿エリアの現在の運行情報路線図"
-                        class="jr-west-route-map-image"
-                    >
-                </figure>
-            </div>
-        </div>
-    `;
 }
 
 /**

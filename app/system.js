@@ -1,8 +1,3 @@
-let isTickerRunning = false;
-let infoQueue = [];
-let queueIndex = 0;
-let slideIndex = 0;
-
 // 1秒ごとの時計/バス更新
 scheduleLoadPromise
     .then(() => {
