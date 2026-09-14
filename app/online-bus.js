@@ -1,4 +1,4 @@
-﻿const ONLINE_BUS_MAX_AGE_MS = 120000;
+const ONLINE_BUS_MAX_AGE_MS = 120000;
 const ONLINE_BUS_LOCAL_RELOAD_MS = 1000;
 
 let onlineBusState = {
@@ -175,10 +175,14 @@ function parseOnlineApproachHtml(html, direction) {
                 startScheduledTime,
                 startDepartureTime,
             );
+            const startDepartureBeforeFlg =
+                !!startDepartureTime && /発車前/.test(allText);
+            const startDepartureDelayEstimateFlg =
+                startDepartureBeforeFlg &&
+                hasOnlineDelayEstimateNotice(delayEstimateText);
             const startDepartureUndetectedFlg =
-                !!startDepartureTime &&
-                /発車前/.test(allText) &&
-                !hasOnlineDelayEstimateNotice(delayEstimateText);
+                startDepartureBeforeFlg &&
+                !startDepartureDelayEstimateFlg;
             const delayMinutes = timeData.predictedTime
                 ? parseDelayMinutes(
                       passInfo,
@@ -202,6 +206,8 @@ function parseOnlineApproachHtml(html, direction) {
                 delayEstimateMinutes,
                 startDepartureTime,
                 startDepartureDelayMinutes,
+                startDepartureBeforeFlg,
+                startDepartureDelayEstimateFlg,
                 startDepartureUndetectedFlg,
                 delayMinutes,
                 delayText:
@@ -275,6 +281,8 @@ function parseOfficialTimetableHtml(html, direction, routeDetails = {}) {
                     delayEstimateMinutes: 0,
                     startDepartureTime: "",
                     startDepartureDelayMinutes: 0,
+                    startDepartureBeforeFlg: false,
+                    startDepartureDelayEstimateFlg: false,
                     startDepartureUndetectedFlg: false,
                     delayMinutes: 0,
                     delayText: "",

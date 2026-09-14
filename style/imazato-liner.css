@@ -482,8 +482,9 @@
     flex: 0 0 auto;
     display: flex;
     align-items: center;
-    justify-content: center;
+    justify-content: space-between;
     gap: 18px;
+    width: 100%;
     margin: 8px 0;
 }
 

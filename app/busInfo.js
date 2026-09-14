@@ -7,18 +7,26 @@ const engVisible = {
     bus_msg: 5,
 };
 const OBON_SATURDAY_DATE_KEYS = ["2026-08-13", "2026-08-14"];
+const busDeveloperState = {
+    characterMode: "random",
+    testOverride: null,
+    lastCommand: "",
+    commandBuffer: "",
+    commandBufferTimer: null,
+    remoteCommandId: "",
+};
 
 const transferGuideMessages = {
     "35_北": "地下鉄千日前線・今里筋線は、「地下鉄今里」で。地下鉄中央線は、「地下鉄緑橋」で。JR学研都市線・おおさか東線は、「鴫野駅前」で。地下鉄長堀鶴見緑地線は、「地下鉄蒲生四丁目」で。京阪線は、「地下鉄関目成育」で。地下鉄谷町線は、「高殿」でお乗り換えください。",
     "35A_北": "地下鉄千日前線・今里筋線は、「地下鉄今里」でお乗り換えください。",
     "85_北": "地下鉄千日前線・今里筋線は、「地下鉄今里」で。地下鉄長堀鶴見緑地線・JR環状線は、「玉造」で。地下鉄谷町線は、「谷町六丁目」で。地下鉄堺筋線は、「長堀橋」で。地下鉄御堂筋線・四つ橋線は、「心斎橋」で。近鉄難波線・阪神なんば線・南海線は、「なんば」でお乗り換えください。",
-    "73_北": "JR環状線は、「桃谷駅前」で。地下鉄千日前線・近鉄難波線・奈良線・大阪線は「鶴橋駅前」で。地下鉄谷町線は、「谷町九丁目」で。地下鉄堺筋線は、「日本橋一丁目」で。地下鉄御堂筋線・四つ橋線・阪神なんば線・南海線は、「なんば」でお乗り換えください。",
-    "35_南": "JR大和路線は「杭全」でお乗り換えください。",
-    "35A_南": "JR大和路線は「杭全」でお乗り換えください。",
-    "85_南": "JR大和路線は「杭全」でお乗り換えください。",
-    "13_北": "地下鉄千日前線は「北巽バスターミナル」でお乗り換えください。",
-    "73_南": "JR大和路線は「杭全」で。地下鉄谷町線は、「地下鉄平野」でお乗り換えください。",
-    "13_南": "JR環状線は、「寺田町駅前」で。地下鉄御堂筋線・谷町線・JR阪和線・JR大和路線・近鉄南大阪線・阪堺線は、「あべの橋」でお乗り換えください。",
+    "73_北": "JR環状線は、「桃谷駅前」で。地下鉄千日前線・近鉄難波線・奈良線・大阪線は、「鶴橋駅前」で。地下鉄谷町線は、「谷町九丁目」で。地下鉄堺筋線は、「日本橋一丁目」で。地下鉄御堂筋線・四つ橋線・阪神なんば線・南海線は、「なんば」でお乗り換えください。",
+    "35_南": "JR大和路線は、「杭全」でお乗り換えください。",
+    "35A_南": "JR大和路線は、「杭全」でお乗り換えください。",
+    "85_南": "JR大和路線は、「杭全」でお乗り換えください。",
+    "13_北": "地下鉄千日前線は、「北巽バスターミナル」でお乗り換えください。",
+    "73_南": "JR大和路線は、「杭全」で。地下鉄谷町線は、「地下鉄平野」でお乗り換えください。",
+    "13_南": "JR環状線は、「寺田町駅前」で。地下鉄御堂筋線・谷町線・JR阪和線・JR大和路線・近鉄南大阪線・阪堺上町線は、「あべの橋」でお乗り換えください。",
 };
 
 /**
@@ -195,7 +203,37 @@ function isStartDepartureUndetected(bus, now, baseDate) {
         baseDate,
     ).pure_seconds;
 
-    return startDiffSeconds <= -120;
+    return startDiffSeconds <= -60;
+}
+
+function getStartDepartureUndetectedText(bus, now, baseDate) {
+    const startDiffSeconds = calculateDiff(
+        bus.startDepartureTime,
+        now,
+        baseDate,
+    ).pure_seconds;
+
+    return startDiffSeconds <= -600
+        ? "発車情報未検出"
+        : "始発発車未検知";
+}
+
+function getBusStartDepartureStatus(bus, now, baseDate) {
+    if (bus.suspensionFlg || !bus.onlineFlg) return null;
+    if (!bus.startDepartureBeforeFlg || !bus.startDepartureTime) return null;
+
+
+    if (bus.startDepartureDelayEstimateFlg) {
+        return { text: "始発発車遅れ見込み", color: "#ee7b1a" };
+    }
+    if (isStartDepartureUndetected(bus, now, baseDate)) {
+        return {
+            text: getStartDepartureUndetectedText(bus, now, baseDate),
+            color: "#e02135",
+        };
+    }
+
+    return { text: "発車前", color: "#019a66" };
 }
 
 function getBusRemovalTime(bus, now, baseDate) {
@@ -332,24 +370,30 @@ function refresh() {
     const onlinePollIntervalSeconds = onlineSchedule
         ? getOnlineBusPollIntervalSeconds()
         : null;
-    const schedule = onlineSchedule
+    const sourceSchedule = onlineSchedule
         ? {
               ...displaySchedule.schedule,
               ...onlineSchedule,
           }
         : displaySchedule.schedule;
+    const schedule = applyBusDeveloperOverrides(sourceSchedule, now);
 
     const onlineUpdateTime = onlineFetchedAt
         ? `${String(onlineFetchedAt.getHours()).padStart(2, "0")}:${String(onlineFetchedAt.getMinutes()).padStart(2, "0")}`
         : "";
     const isOutsideOnlineServiceHours =
         now.getHours() >= 1 && now.getHours() < 5;
-    document.getElementById("debug-mode").textContent =
-        isOutsideOnlineServiceHours
-            ? "● オンラインデータ（情報提供時間外）"
-            : onlineSchedule
-              ? `● オンラインデータ（${onlineUpdateTime}更新・${onlinePollIntervalSeconds}秒間隔更新）`
-              : `● ${displaySchedule.name}`;
+    document.getElementById("debug-mode").textContent = isBusDeveloperMode()
+        ? "● 開発者モード（" + busDeveloperState.lastCommand + "）"
+        : isOutsideOnlineServiceHours
+          ? "● オンラインデータ（情報提供時間外）"
+          : onlineSchedule
+            ? "● オンラインデータ（" +
+              onlineUpdateTime +
+              "更新・" +
+              onlinePollIntervalSeconds +
+              "秒間隔更新）"
+            : "● " + displaySchedule.name;
     const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
     const days = ["日", "月", "火", "水", "木", "金", "土"];
     const dateStr = `${now.getFullYear()}年${String(now.getMonth() + 1).padStart(2, "0")}月${String(now.getDate()).padStart(2, "0")}日（${days[now.getDay()]}）`;
@@ -453,49 +497,26 @@ function getTimetableFallbackStatus(bus, cycleSeconds) {
 }
 
 function isBusPagingTarget(bus, now, opDate) {
-    if (isStartDepartureUndetected(bus, now, opDate)) return true;
-
     const scheduledSeconds = calculateDiff(bus.time, now, opDate).pure_seconds;
-    const removalSeconds = calculateRemovalDiff(bus, now, opDate).pure_seconds;
+    if (scheduledSeconds >= 0) return scheduledSeconds <= 1200;
 
-    return scheduledSeconds <= 1200 || removalSeconds <= 1200;
+    return (
+        isStartDepartureUndetected(bus, now, opDate) ||
+        bus.startDepartureDelayEstimateFlg === true ||
+        hasMajorDelayForDisplay(bus, now, opDate)
+    );
 }
 
 function getBusPagingWindow(activeUpcoming, now, opDate, maxDisplay) {
-    let latestPagingTargetSeconds = null;
+    const pagingTargets = activeUpcoming.filter((bus) =>
+        isBusPagingTarget(bus, now, opDate),
+    );
 
-    activeUpcoming.forEach((bus) => {
-        if (!isBusPagingTarget(bus, now, opDate)) return;
-
-        const displaySeconds = calculateDiff(
-            getBusSortTime(bus),
-            now,
-            opDate,
-        ).pure_seconds;
-        if (
-            latestPagingTargetSeconds === null ||
-            displaySeconds > latestPagingTargetSeconds
-        ) {
-            latestPagingTargetSeconds = displaySeconds;
-        }
-    });
-
-    if (latestPagingTargetSeconds === null) {
+    if (pagingTargets.length < maxDisplay) {
         return activeUpcoming.slice(0, maxDisplay);
     }
 
-    const pagingWindow = activeUpcoming.filter((bus) => {
-        return (
-            calculateDiff(getBusSortTime(bus), now, opDate).pure_seconds <=
-            latestPagingTargetSeconds
-        );
-    });
-
-    if (pagingWindow.length < maxDisplay) {
-        return activeUpcoming.slice(0, maxDisplay);
-    }
-
-    return pagingWindow;
+    return pagingTargets;
 }
 
 function getTransferGuidePagingBuses(buses, now, opDate, maxDisplay) {
@@ -515,6 +536,341 @@ function getTransferGuidePagingBuses(buses, now, opDate, maxDisplay) {
 
     return pagingWindow;
 }
+
+const BUS_STATUS_ICON_CHARACTERS = ["naaasuooo", "rimy", "tokumix"];
+const BUS_STATUS_ICON_STORAGE_PREFIX = "bus-status-icon-assignments:";
+const busStatusIconAssignmentCache = new Map();
+
+function getBusStatusIconAssignments(dateKey) {
+    if (busStatusIconAssignmentCache.has(dateKey)) {
+        return busStatusIconAssignmentCache.get(dateKey);
+    }
+
+    const storageKey = BUS_STATUS_ICON_STORAGE_PREFIX + dateKey;
+    let assignments = {};
+    try {
+        const saved = localStorage.getItem(storageKey);
+        if (saved) assignments = JSON.parse(saved);
+
+        for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+            const key = localStorage.key(index);
+            if (
+                key?.startsWith(BUS_STATUS_ICON_STORAGE_PREFIX) &&
+                key !== storageKey
+            ) {
+                localStorage.removeItem(key);
+            }
+        }
+    } catch (error) {
+        console.warn("キャラクター割り当ての読込に失敗しました。", error);
+    }
+
+    busStatusIconAssignmentCache.set(dateKey, assignments);
+    return assignments;
+}
+
+function saveBusStatusIconAssignments(dateKey, assignments) {
+    try {
+        localStorage.setItem(
+            BUS_STATUS_ICON_STORAGE_PREFIX + dateKey,
+            JSON.stringify(assignments),
+        );
+    } catch (error) {
+        console.warn("キャラクター割り当ての保存に失敗しました。", error);
+    }
+}
+
+function getBusStatusIconCharacter(bus, opDate) {
+    const dateKey = formatDateKey(opDate);
+    const tripKey = [
+        bus.time,
+        bus.line,
+        bus.dir || "",
+        getBusDestination(bus),
+    ].join("|");
+    const assignments = getBusStatusIconAssignments(dateKey);
+
+    if (!BUS_STATUS_ICON_CHARACTERS.includes(assignments[tripKey])) {
+        const randomIndex = Math.floor(
+            Math.random() * BUS_STATUS_ICON_CHARACTERS.length,
+        );
+        assignments[tripKey] = BUS_STATUS_ICON_CHARACTERS[randomIndex];
+        saveBusStatusIconAssignments(dateKey, assignments);
+    }
+
+    return assignments[tripKey];
+}
+
+function getBusTravelIconPath(bus, opDate, statusName) {
+    if (busDeveloperState.characterMode === "original") {
+        const originalIcons = {
+            walk_blue: "walk.png",
+            walk_green: "walk.png",
+            fast: "walk_fast.png",
+            run: "run.png",
+            missed: "missed.png",
+        };
+        return originalIcons[statusName] || "";
+    }
+
+    const character = getBusStatusIconCharacter(bus, opDate);
+    return "status_icon/" + character + "/" + character + "_" + statusName + ".png";
+}
+
+function normalizeBusDeveloperTime(value) {
+    const digits = String(value || "").replace(/\D/g, "");
+    if (digits.length !== 4) return "";
+
+    const hour = Number(digits.slice(0, 2));
+    const minute = Number(digits.slice(2));
+    if (hour > 23 || minute > 59) return "";
+
+    return digits.slice(0, 2) + ":" + digits.slice(2);
+}
+
+function formatBusDeveloperTime(date) {
+    return (
+        String(date.getHours()).padStart(2, "0") +
+        ":" +
+        String(date.getMinutes()).padStart(2, "0")
+    );
+}
+
+function getBusDeveloperOverride(bus, now) {
+    const override = busDeveloperState.testOverride;
+    if (
+        !override ||
+        bus.time !== override.time ||
+        String(bus.line || "").toUpperCase() !== override.line
+    ) {
+        return bus;
+    }
+
+    const common = {
+        ...bus,
+        onlineFlg: true,
+        timetableFlg: true,
+        serviceUnavailableFlg: false,
+    };
+    if (override.type === "suspension") {
+        return {
+            ...common,
+            suspensionFlg: true,
+            delayMinutes: 0,
+            delayText: "",
+        };
+    }
+    if (override.type === "departure-delay") {
+        return {
+            ...common,
+            suspensionFlg: false,
+            predictedTime: "",
+            delayEstimateTime: addMinutesToBusTime(bus.time, override.minutes),
+            delayEstimateMinutes: override.minutes,
+            startDepartureTime: formatBusDeveloperTime(now),
+            startDepartureBeforeFlg: true,
+            startDepartureDelayEstimateFlg: true,
+            startDepartureUndetectedFlg: false,
+            delayMinutes: override.minutes,
+            delayText: "約" + override.minutes + "分遅れ見込み",
+        };
+    }
+    if (override.type === "delay") {
+        const predictedDate = new Date(now.getTime() + override.minutes * 60000);
+        return {
+            ...common,
+            suspensionFlg: false,
+            predictedTime: formatBusDeveloperTime(predictedDate),
+            delayEstimateTime: "",
+            delayEstimateMinutes: 0,
+            startDepartureBeforeFlg: false,
+            startDepartureDelayEstimateFlg: false,
+            startDepartureUndetectedFlg: false,
+            delayMinutes: override.minutes,
+            delayText: "約" + override.minutes + "分遅れ",
+        };
+    }
+
+    const startDate = new Date(now.getTime() - 60000);
+    return {
+        ...common,
+        suspensionFlg: false,
+        predictedTime: "",
+        delayEstimateTime: "",
+        delayEstimateMinutes: 0,
+        startDepartureTime: formatBusDeveloperTime(startDate),
+        startDepartureBeforeFlg: true,
+        startDepartureDelayEstimateFlg: false,
+        startDepartureUndetectedFlg: true,
+        delayMinutes: 0,
+        delayText: "",
+    };
+}
+
+function addMinutesToBusTime(time, minutes) {
+    const match = String(time || "").match(/^(\d{2}):(\d{2})$/);
+    if (!match) return "";
+
+    const total = (Number(match[1]) * 60 + Number(match[2]) + minutes) % 1440;
+    return (
+        String(Math.floor(total / 60)).padStart(2, "0") +
+        ":" +
+        String(total % 60).padStart(2, "0")
+    );
+}
+
+function applyBusDeveloperOverrides(schedule, now) {
+    if (!busDeveloperState.testOverride) return schedule;
+
+    const result = {};
+    for (const [groupName, buses] of Object.entries(schedule || {})) {
+        result[groupName] = Array.isArray(buses)
+            ? buses.map((bus) => getBusDeveloperOverride(bus, now))
+            : buses;
+    }
+    return result;
+}
+
+function setBusDeveloperCommand(commandText) {
+    const command = String(commandText || "").trim().toLowerCase();
+    let match = command.match(/^test bus suspension (\d{4}) ([0-9a-z]+)$/);
+    let override = null;
+
+    if (command === "char original") {
+        busDeveloperState.characterMode = "original";
+    } else if (command === "char random") {
+        busDeveloperState.characterMode = "random";
+    } else if (match) {
+        override = {
+            type: "suspension",
+            time: normalizeBusDeveloperTime(match[1]),
+            line: match[2].toUpperCase(),
+        };
+    } else if (
+        (match = command.match(
+            /^test bus delay departure (\d{4}) ([0-9a-z]+) -(\d{1,3})$/,
+        ))
+    ) {
+        override = {
+            type: "departure-delay",
+            time: normalizeBusDeveloperTime(match[1]),
+            line: match[2].toUpperCase(),
+            minutes: Number(match[3]),
+        };
+    } else if (
+        (match = command.match(
+            /^test bus delay (\d{4}) ([0-9a-z]+) -(\d{1,3})$/,
+        ))
+    ) {
+        override = {
+            type: "delay",
+            time: normalizeBusDeveloperTime(match[1]),
+            line: match[2].toUpperCase(),
+            minutes: Number(match[3]),
+        };
+    } else if (
+        (match = command.match(
+            /^test bus location error (\d{4}) ([0-9a-z]+)$/,
+        ))
+    ) {
+        override = {
+            type: "location-error",
+            time: normalizeBusDeveloperTime(match[1]),
+            line: match[2].toUpperCase(),
+        };
+    } else if (command === "test bus clear") {
+        busDeveloperState.testOverride = null;
+    } else {
+        console.warn("未対応のバス開発者コマンドです:", commandText);
+        return false;
+    }
+
+    if (override) {
+        if (!override.time || Number(override.minutes || 1) <= 0) return false;
+        busDeveloperState.testOverride = override;
+    }
+    busDeveloperState.lastCommand = command;
+    console.info("バス開発者コマンドを適用しました:", command);
+    return true;
+}
+
+function registerBusDeveloperTerminal() {
+    window.busTerminal = setBusDeveloperCommand;
+
+    document.addEventListener("keydown", (event) => {
+        const target = event.target;
+        if (
+            event.ctrlKey ||
+            event.altKey ||
+            event.metaKey ||
+            target instanceof HTMLInputElement ||
+            target instanceof HTMLTextAreaElement
+        ) {
+            return;
+        }
+
+        if (event.key === "Escape") {
+            busDeveloperState.commandBuffer = "";
+            return;
+        }
+        if (event.key === "Backspace") {
+            busDeveloperState.commandBuffer =
+                busDeveloperState.commandBuffer.slice(0, -1);
+            return;
+        }
+        if (event.key === "Enter") {
+            if (busDeveloperState.commandBuffer) {
+                setBusDeveloperCommand(busDeveloperState.commandBuffer);
+                busDeveloperState.commandBuffer = "";
+                event.preventDefault();
+            }
+            return;
+        }
+        if (event.key.length !== 1) return;
+
+        busDeveloperState.commandBuffer += event.key;
+        if (busDeveloperState.commandBuffer.length > 100) {
+            busDeveloperState.commandBuffer =
+                busDeveloperState.commandBuffer.slice(-100);
+        }
+        clearTimeout(busDeveloperState.commandBufferTimer);
+        busDeveloperState.commandBufferTimer = setTimeout(() => {
+            busDeveloperState.commandBuffer = "";
+        }, 15000);
+    });
+}
+
+function isBusDeveloperMode() {
+    return (
+        busDeveloperState.characterMode === "original" ||
+        busDeveloperState.testOverride !== null
+    );
+}
+
+function applyRemoteBusDeveloperCommand() {
+    const payload = window.busDeveloperRemoteCommand;
+    if (!payload?.commandId || !payload.command) return;
+    if (payload.commandId === busDeveloperState.remoteCommandId) return;
+
+    busDeveloperState.remoteCommandId = payload.commandId;
+    setBusDeveloperCommand(payload.command);
+}
+
+function reloadRemoteBusDeveloperCommand() {
+    const oldScript = document.getElementById("bus-developer-command-script");
+    if (oldScript) oldScript.remove();
+
+    const script = document.createElement("script");
+    script.id = "bus-developer-command-script";
+    script.src = `temp/bus_developer_command.js?t=${Date.now()}`;
+    script.onload = applyRemoteBusDeveloperCommand;
+    script.onerror = () => script.remove();
+    document.head.appendChild(script);
+}
+
+registerBusDeveloperTerminal();
+reloadRemoteBusDeveloperCommand();
+setInterval(reloadRemoteBusDeveloperCommand, 1000);
 
 function getLineNumberStyle(line) {
     const lineText = String(line || "");
@@ -622,19 +978,24 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
                 cycleSeconds,
             );
             const isWaitingForOnlineInfo = !!timetableFallbackStatus;
-            const startDepartureUndetected = isStartDepartureUndetected(bus, now, opDate);
+            const startDepartureStatus = getBusStartDepartureStatus(
+                bus,
+                now,
+                opDate,
+            );
             const hasMajorDelay = hasMajorDelayForDisplay(bus, now, opDate);
             const predictedSeconds = pureSeconds;
-            const delayStatusInfo = startDepartureUndetected
-                ? { text: "始発発車未検知", color: "#e02135" }
-                : hasMajorDelay && bus.delayText
-                  ? { text: bus.delayText, color: "#e02135" }
-                  : null;
+            const delayStatusInfo = bus.suspensionFlg
+                ? null
+                : startDepartureStatus ||
+                  (hasMajorDelay && bus.delayText
+                      ? { text: bus.delayText, color: "#e02135" }
+                      : null);
             const lastInfo = bus.lastFlg
                 ? { text: "\u6700\u7d42", color: "#e02135" }
                 : null;
             const suspensionInfo = bus.suspensionFlg
-                ? { text: "\u904b\u8ee2\u4f11\u6b62", color: "#e02135" }
+                ? { text: "\u904b\u4f11", color: "#e02135" }
                 : null;
             const isWithinDetailWindow =
                 (diff >= 0 || hasMajorDelay) && diff_sec_pure <= 900;
@@ -711,11 +1072,17 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
             } else if (delayOnly) {
                 imgName = "infomation.png";
             } else if (isWithinDetailWindow) {
-                if (diff_sec_pure <= 270 && !hasMajorDelay)
-                    imgName = "missed.png";
-                else if (diff <= 7) imgName = "run.png";
-                else if (diff <= 8) imgName = "walk_fast.png";
-                else imgName = "walk.png";
+                if (diff_sec_pure <= 270 && !hasMajorDelay) {
+                    imgName = getBusTravelIconPath(bus, opDate, "missed");
+                } else if (diff <= 7) {
+                    imgName = getBusTravelIconPath(bus, opDate, "run");
+                } else if (diff <= 8) {
+                    imgName = getBusTravelIconPath(bus, opDate, "fast");
+                } else if (diff_sec_pure <= 600) {
+                    imgName = getBusTravelIconPath(bus, opDate, "walk_green");
+                } else {
+                    imgName = getBusTravelIconPath(bus, opDate, "walk_blue");
+                }
             }
             if (isWaitingForOnlineInfo) {
                 imgName = "";
@@ -833,7 +1200,7 @@ function isTransferGuideTarget(bus, now, opDate) {
     const scheduledSeconds = calculateDiff(bus.time, now, opDate).pure_seconds;
     const removalSeconds = calculateRemovalDiff(bus, now, opDate).pure_seconds;
 
-    return scheduledSeconds <= 1200 && removalSeconds >= 175;
+    return scheduledSeconds <= 1200 && removalSeconds >= 180;
 }
 
 function getTransferGuideTargetBuses(displayedBuses, now, opDate) {
