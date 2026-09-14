@@ -394,6 +394,19 @@ html {
     padding: 15px 25px;
 }
 
+.header-network-clock {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+}
+
+.network-health-icon {
+    width: 34px;
+    height: 34px;
+    object-fit: contain;
+    flex: 0 0 auto;
+}
 .header-clock {
     text-align: right;
     font-size: 1.8rem;

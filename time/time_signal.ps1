@@ -22,6 +22,7 @@ $sqliteExePath = $networkSqlitePaths.SqliteExePath
 $networkSummaryPath = Join-Path $runtimeDbDir "network_status_summary.json"
 $networkHistoryErrorMessage = ""
 
+
 Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
@@ -88,6 +89,7 @@ function Get-JsonResponse {
 
     return ($Payload | ConvertTo-Json -Depth 12 -Compress)
 }
+
 
 function Read-NetworkSummary {
     if (-not (Test-Path -LiteralPath $networkSummaryPath -PathType Leaf)) {
@@ -433,6 +435,7 @@ function Invoke-TimeSignalControlRequest {
     if ($uri.AbsolutePath -eq "/time-signal/network/status") {
         return Get-NetworkStatusJson -Uri $uri
     }
+
 
     if ($uri.AbsolutePath -eq "/time-signal/system/restart") {
         return Get-RestartAcceptedJson
