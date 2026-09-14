@@ -58,16 +58,16 @@ function Get-YahooRailwayColor {
 
 while ($true) {
     $data = @{
-        weather    = @();
-        news       = @();
-        railway    = @();
+        weather           = @();
+        news              = @();
+        railway           = @();
         jrWestRouteMapUrl = $null;
-        earthquake = $null;
-        tsunami    = @();
-        evacuation = @();
-        weeklyWeather = $null;
-        weatherWarnings = $null;
-        updateTime = "";
+        earthquake        = $null;
+        tsunami           = @();
+        evacuation        = @();
+        weeklyWeather     = $null;
+        weatherWarnings   = $null;
+        updateTime        = "";
     }
     Write-Host "$(Get-Date -Format 'HH:mm:ss') [Snow Link Drone] 情報更新開始..." -ForegroundColor Cyan
 
@@ -137,19 +137,19 @@ while ($true) {
                 $weeklyWeatherSeries = $jma[1].timeSeries[0]
                 $weeklyTemperatureSeries = $jma[1].timeSeries[1]
                 $weeklyWeatherArea = $weeklyWeatherSeries.areas |
-                    Where-Object { $_.area.code -eq "270000" } |
-                    Select-Object -First 1
+                Where-Object { $_.area.code -eq "270000" } |
+                Select-Object -First 1
                 $weeklyTemperatureArea = $weeklyTemperatureSeries.areas |
-                    Where-Object { $_.area.code -eq "62078" } |
-                    Select-Object -First 1
+                Where-Object { $_.area.code -eq "62078" } |
+                Select-Object -First 1
 
                 if ($weeklyWeatherArea -and $weeklyTemperatureArea) {
                     $shortTemperatureSeries = $jma[0].timeSeries |
-                        Where-Object { $_.areas[0].temps } |
-                        Select-Object -First 1
+                    Where-Object { $_.areas[0].temps } |
+                    Select-Object -First 1
                     $shortTemperatureArea = $shortTemperatureSeries.areas |
-                        Where-Object { $_.area.code -eq "62078" } |
-                        Select-Object -First 1
+                    Where-Object { $_.area.code -eq "62078" } |
+                    Select-Object -First 1
                     $weeklyDays = @()
                     $weeklyTimes = @($weeklyWeatherSeries.timeDefines)
                     $todayDate = (Get-Date).Date
@@ -200,19 +200,19 @@ while ($true) {
                         }
 
                         $weeklyDays += @{
-                            date = $targetDate.ToString("yyyy-MM-dd")
-                            weatherCode = [string]$weeklyWeatherArea.weatherCodes[$dayIndex]
+                            date                     = $targetDate.ToString("yyyy-MM-dd")
+                            weatherCode              = [string]$weeklyWeatherArea.weatherCodes[$dayIndex]
                             precipitationProbability = if ([string]::IsNullOrWhiteSpace($pop)) { $null } else { [int]$pop }
-                            temperatureMin = if ([string]::IsNullOrWhiteSpace($tempMin)) { $null } else { [int]$tempMin }
-                            temperatureMax = if ([string]::IsNullOrWhiteSpace($tempMax)) { $null } else { [int]$tempMax }
-                            reliability = [string]$weeklyWeatherArea.reliabilities[$dayIndex]
+                            temperatureMin           = if ([string]::IsNullOrWhiteSpace($tempMin)) { $null } else { [int]$tempMin }
+                            temperatureMax           = if ([string]::IsNullOrWhiteSpace($tempMax)) { $null } else { [int]$tempMax }
+                            reliability              = [string]$weeklyWeatherArea.reliabilities[$dayIndex]
                         }
                     }
 
                     $data.weeklyWeather = @{
                         reportDatetime = [string]$jma[1].reportDatetime
-                        areaName = "大阪府"
-                        days = $weeklyDays
+                        areaName       = "大阪府"
+                        days           = $weeklyDays
                     }
                     Write-Host " 週間天気予報：気象庁データ取得済み" -ForegroundColor Green
                 }
@@ -268,9 +268,9 @@ while ($true) {
                     }
 
                     $warningItem = @{
-                        code = $code
-                        name = [string]$kind.name
-                        status = $status
+                        code           = $code
+                        name           = [string]$kind.name
+                        status         = $status
                         reportDatetime = [string]$report.reportDatetime
                     }
                     if ([string]::IsNullOrWhiteSpace($warningReportDatetime)) {
@@ -287,8 +287,8 @@ while ($true) {
 
         $data.weatherWarnings = @{
             reportDatetime = $warningReportDatetime
-            areaName = "大阪市"
-            warnings = $osakaCityWarnings
+            areaName       = "大阪市"
+            warnings       = $osakaCityWarnings
         }
 
         if ($osakaCityWarnings.Count -gt 0) {
@@ -355,10 +355,10 @@ while ($true) {
 
             if (-not $Detail.versionDetail) { return $null }
             return @($Detail.versionDetail) |
-                Sort-Object `
-                    @{ Expression = { Get-JRWestVersionDetailSortTicks -VersionDetail $_ }; Descending = $true },
-                    @{ Expression = { Get-JRWestVersionDetailSortId -VersionDetail $_ }; Descending = $true } |
-                Select-Object -First 1
+            Sort-Object `
+            @{ Expression = { Get-JRWestVersionDetailSortTicks -VersionDetail $_ }; Descending = $true },
+            @{ Expression = { Get-JRWestVersionDetailSortId -VersionDetail $_ }; Descending = $true } |
+            Select-Object -First 1
         }
 
         function Get-JRWestTrafficColor {
@@ -399,7 +399,7 @@ while ($true) {
         function Get-JRWestMatchedLimitedExpressNames {
             param($Line, $Detail)
 
-            $targets = @("こうのとり", "はまかぜ", "きのさき", "はしだて", "まいづる")
+            $targets = @("こうのとり", "はまかぜ", "きのさき", "はしだて", "まいづる", "はるか", "くろしお", "サンダーバード", "らくラクびわこ", "らくラクはりま", "らくラクやまと", "まほろば", "はくと", "スーパーはくと", "寝台列車", "サンライズ瀬戸", "サンライズ出雲", "サンライズ瀬戸・出雲")
             $searchText = Get-JRWestDetailSearchText -Line $Line -Detail $Detail
             return @($targets | Where-Object { $searchText -match [regex]::Escape($_) })
         }
@@ -422,11 +422,11 @@ while ($true) {
             if (-not $DirectionInfo) { return @() }
 
             $direction = ([string](Get-JRWestPropertyValue `
-                -Source $DirectionInfo `
-                -PropertyName "direction")).Trim()
+                        -Source $DirectionInfo `
+                        -PropertyName "direction")).Trim()
             $trainInfo = ([string](Get-JRWestPropertyValue `
-                -Source $DirectionInfo `
-                -PropertyName "trainInfo")).Trim()
+                        -Source $DirectionInfo `
+                        -PropertyName "trainInfo")).Trim()
             if ([string]::IsNullOrWhiteSpace($direction) -and
                 [string]::IsNullOrWhiteSpace($trainInfo)) {
                 return @()
@@ -544,9 +544,9 @@ while ($true) {
                     $sectionDirection = [string]$sec.upAndDown
                     $isSanyoShinkansen = $DisplayName -eq "山陽新幹線"
                     $isSingleDirection =
-                        $isSanyoShinkansen -and
-                        $sectionDirection -match "上り|下り" -and
-                        $sectionDirection -notmatch "上下|両|上り.*下り|下り.*上り"
+                    $isSanyoShinkansen -and
+                    $sectionDirection -match "上り|下り" -and
+                    $sectionDirection -notmatch "上下|両|上り.*下り|下り.*上り"
                     $sectionPrefix = if ($isSanyoShinkansen -or [string]::IsNullOrWhiteSpace($sectionDirection)) { "" } else { "[$sectionDirection] " }
                     $sectionSeparator = if ($isSingleDirection) { "　→　" } else { "　～　" }
 
@@ -554,9 +554,9 @@ while ($true) {
                     $sectionEndStation = [string]$sec.endStation
                     if ($isSingleDirection) {
                         $directedStations = @(Get-JRWestDirectedShinkansenStations `
-                            -StartStation $sectionStartStation `
-                            -EndStation $sectionEndStation `
-                            -Direction $sectionDirection)
+                                -StartStation $sectionStartStation `
+                                -EndStation $sectionEndStation `
+                                -Direction $sectionDirection)
                         $sectionStartStation = [string]$directedStations[0]
                         $sectionEndStation = [string]$directedStations[1]
                     }
@@ -609,15 +609,15 @@ while ($true) {
             $color = Get-JRWestTrafficColor -Detail $Detail -SectionSeverity $maxSev
 
             [void]$Results.Add(@{
-                company = "JR西日本";
-                name = $DisplayName;
-                msg = $msg;
-                color = $color;
-                title = $title;
-                body = $body;
-                lineCode = 0;
-                limitedExpress = $isLimitedExpress;
-            })
+                    company        = "JR西日本";
+                    name           = $DisplayName;
+                    msg            = $msg;
+                    color          = $color;
+                    title          = $title;
+                    body           = $body;
+                    lineCode       = 0;
+                    limitedExpress = $isLimitedExpress;
+                })
             Write-Host "  -> [JR] $DisplayName ($color) を採用" -ForegroundColor Green
         }
 
@@ -703,15 +703,15 @@ while ($true) {
                 $SeenKeys[$seenKey] = $true
 
                 [void]$Results.Add(@{
-                    company = "JR西日本";
-                    name = $displayName;
-                    msg = $msg;
-                    color = "orange";
-                    title = $title;
-                    body = $body;
-                    lineCode = 1;
-                    limitedExpress = $false;
-                })
+                        company        = "JR西日本";
+                        name           = $displayName;
+                        msg            = $msg;
+                        color          = "orange";
+                        title          = $title;
+                        body           = $body;
+                        lineCode       = 1;
+                        limitedExpress = $false;
+                    })
                 Write-Host "  -> [JR] $displayName noEffect ($title) を採用" -ForegroundColor Green
             }
         }
