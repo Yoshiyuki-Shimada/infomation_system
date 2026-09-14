@@ -290,8 +290,12 @@
     margin-top: 4px;
 }
 
-#slide-container.with-earthquake-bottom-banner .temperature-day-labels-now .temperature-day-label,
-.slide-area.with-earthquake-bottom-banner .temperature-day-labels-now .temperature-day-label {
+#slide-container.with-earthquake-bottom-banner
+    .temperature-day-labels-now
+    .temperature-day-label,
+.slide-area.with-earthquake-bottom-banner
+    .temperature-day-labels-now
+    .temperature-day-label {
     padding: 3px 10px;
     font-size: 0.9rem;
 }
@@ -573,6 +577,7 @@
 
 .weather-warning-special {
     color: #000;
+    border: 10px solid #ff0000;
     background: #fff;
 }
 
@@ -849,7 +854,9 @@
     min-width: 0;
     opacity: 0;
     transform: translateY(10px);
-    transition: opacity 0.35s ease, transform 0.35s ease;
+    transition:
+        opacity 0.35s ease,
+        transform 0.35s ease;
     pointer-events: none;
 }
 
