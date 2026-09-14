@@ -296,63 +296,6 @@ function getBusDestination(bus) {
     return normalizeDestinationName(routeInfo?.dest);
 }
 
-function doesScheduleBusMatch(busA, busB) {
-    return (
-        busA.time === busB.time &&
-        String(busA.line) === String(busB.line) &&
-        String(busA.dir || "") === String(busB.dir || "") &&
-        getBusDestination(busA) === getBusDestination(busB)
-    );
-}
-
-function mergeOnlineWithOfflineFallback(onlineBuses, offlineBuses) {
-    const merged = (onlineBuses || []).map((onlineBus) => {
-        const offlineMatch = (offlineBuses || []).find((offlineBus) =>
-            doesScheduleBusMatch(onlineBus, offlineBus),
-        );
-
-        return {
-            ...onlineBus,
-            lastFlg: onlineBus.lastFlg || offlineMatch?.lastFlg === true,
-        };
-    });
-
-    (offlineBuses || []).forEach((offlineBus) => {
-        if (
-            merged.some((onlineBus) =>
-                doesScheduleBusMatch(onlineBus, offlineBus),
-            )
-        ) {
-            return;
-        }
-
-        merged.push({
-            ...offlineBus,
-            onlineFlg: false,
-            delayEstimateTime: "",
-            delayEstimateMinutes: 0,
-            timetableFlg: true,
-        });
-    });
-
-    return merged;
-}
-
-function mergeOnlineScheduleWithOfflineFallback(onlineSchedule, offlineSchedule) {
-    const groupNames = ["oikebashi", "kumata", "abenobashi"];
-    const result = {};
-
-    for (const groupName of groupNames) {
-        const offlineBuses = offlineSchedule[groupName] || [];
-        result[groupName] = mergeOnlineWithOfflineFallback(
-            onlineSchedule[groupName] || [],
-            offlineBuses,
-        );
-    }
-
-    return result;
-}
-
 /**
  * 画面更新メイン処理
  */
@@ -496,6 +439,7 @@ function getTimetableFallbackStatus(bus, cycleSeconds) {
 
 }
 
+// 定刻前は20分以内だけをページングし、定刻後の遅延便は情報が消えるまで残す。
 function isBusPagingTarget(bus, now, opDate) {
     const scheduledSeconds = calculateDiff(bus.time, now, opDate).pure_seconds;
     if (scheduledSeconds >= 0) return scheduledSeconds <= 1200;
@@ -580,6 +524,7 @@ function saveBusStatusIconAssignments(dateKey, assignments) {
     }
 }
 
+// 同じ運行日・同じ便では、状態が変わっても同じキャラクターを使う。
 function getBusStatusIconCharacter(bus, opDate) {
     const dateKey = formatDateKey(opDate);
     const tripKey = [
@@ -972,7 +917,6 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
             let status = "";
             let imgName = "";
             let via_color = "#8c8f93";
-            let status_color = "#e02135";
             const timetableFallbackStatus = getTimetableFallbackStatus(
                 bus,
                 cycleSeconds,

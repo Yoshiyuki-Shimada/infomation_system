@@ -44,15 +44,6 @@
         next.setMinutes(next.getMinutes() + addMinutes);
         return next;
     }
-    function getNextHalfHourAfter(date) {
-        const next = new Date(date);
-        next.setSeconds(0, 0);
-        const minute = next.getMinutes();
-        const addMinutes = minute < 30 ? 30 - minute : 60 - minute;
-        next.setMinutes(minute + (addMinutes === 0 ? 30 : addMinutes));
-        return next;
-    }
-
     function addMinutes(date, minutes) {
         const next = new Date(date);
         next.setMinutes(next.getMinutes() + minutes);

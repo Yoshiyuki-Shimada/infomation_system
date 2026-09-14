@@ -17,23 +17,8 @@ const container = document.getElementById("slide-container");
 const idleView = document.getElementById("idle-view");
 const headerView = document.getElementById("signage-header");
 
-/** 1行あたりの最大文字数 */
-const TEXT_LENGTH = 35;
-
-/** 鉄道情報の最大行数 */
-const TRAIN_INFO_LINE_LENGTH = 8;
-
-/** ニュース情報の最大行数 */
-const NEWS_LINE_LENGTH = 12;
-
 /* 前回の更新時刻を保管 */
 let lastUpdateTime = "";
-
-/** 情報モード */
-const MODE = {
-    RAILWAY: 0,
-    NEWS: 1,
-};
 
 /** 取得路線情報 */
 const TRAIN_COMPANY = {
@@ -55,8 +40,6 @@ let newsArticles;
 
 /** 天気予報を保管する配列 */
 let weatherList;
-
-let lastSignalData;
 
 /**
  * 路線名から路線記号の画像HTMLを生成する
@@ -359,7 +342,7 @@ function importWeatherWarningData() {
     }));
 
     emergencyList.push(
-        createWeatherWarningHtml({
+        ...createWeatherWarningSlidesHtml({
             ...warningData,
             warnings,
         }),
@@ -848,133 +831,6 @@ function prepareAutoScroll(slide) {
         SCROLL_START_DELAY_MS + durationMs + SCROLL_END_WAIT_MS;
     return Math.max(DEFAULT_SLIDE_INTERVAL_MS, scrollCompleteInterval);
 }
-/**
- * 文章を句点（。）で区切り、指定文字数を超えないように分割する
- */
-function splitTextBySentences(text, maxLength) {
-    const sentences = text.split("。");
-    let chunks = [];
-    let currentChunk = "";
-
-    sentences.forEach((s) => {
-        if (!s.trim()) return;
-        const sentence = s + "。";
-        // 現在の塊に次の文を足して制限文字数を超えるなら、新しい塊を作る
-        if (
-            (currentChunk + sentence).length > maxLength &&
-            currentChunk !== ""
-        ) {
-            chunks.push(currentChunk);
-            currentChunk = sentence;
-        } else {
-            currentChunk += sentence;
-        }
-    });
-    if (currentChunk) chunks.push(currentChunk);
-    return chunks;
-}
-
-/**
- * 文章を行数に基づいて分割する
- * @param {string} text 元の文章
- * @param {number} maxLines 1ページあたりの最大行数
- * @param {number} charsPerLine 1行あたりの目安文字数
- * @param {boolean} splitMode 文章の分割モードの選択
- */
-function splitTextByLines(text, maxLines, charsPerLine = 35, splitMode) {
-    if (!text) return [""];
-
-    const rawLines = text.split("\n");
-    let atoms = [];
-
-    switch (splitMode) {
-        case MODE.RAILWAY:
-            {
-                rawLines.forEach((line) => {
-                    const s = line.trim();
-                    if (!s) {
-                        atoms.push("");
-                        return;
-                    }
-
-                    // 見出しやリスト（・や時刻）はそのまま
-                    const isHeader = /^[＜【]/.test(s);
-                    const isList = /^(・|※|[^\s　]+[ 　]+\d{1,2}時)/.test(s);
-
-                    if (isHeader || isList) {
-                        atoms.push(s);
-                    } else {
-                        // 【ここが最大の修正ポイント】
-                        // 文章を「。」の後ろで分割して、1文ずつを1つの塊（atom）にする
-                        // これにより「〜」の途中や駅名の途中で切れるのを防ぐよ
-                        const segments = s.split(/(?<=。)/);
-                        segments.forEach((seg) => {
-                            if (seg.trim()) atoms.push(seg.trim());
-                        });
-                    }
-                });
-            }
-            break;
-
-        case MODE.NEWS:
-            {
-                const segments = text.split(/(?<=[。？?！!])|\n+/);
-                segments.forEach((seg) => {
-                    if (seg === "") {
-                        atoms.push(""); // 空行維持
-                        return;
-                    }
-
-                    const s = seg.trim();
-                    if (!s) return;
-                    // 1文がページ最大容量を超える場合は分割
-                    if (Math.ceil(s.length / charsPerLine) > maxLines) {
-                        for (let i = 0; i < s.length; i += charsPerLine) {
-                            atoms.push(s.substring(i, i + charsPerLine));
-                        }
-                    } else {
-                        atoms.push(s);
-                    }
-                });
-            }
-            break;
-
-        default:
-            console.log(
-                "このモードに対応する機能がありません。  選択モード:" +
-                    splitMode,
-            );
-            break;
-    }
-
-    // 原子（atoms）をページに詰める
-    let pages = [];
-    let currentPageAtoms = [];
-    let currentLineCount = 0;
-
-    atoms.forEach((atom) => {
-        // このアトムが何行分消費するか計算
-        const atomLines = Math.max(1, Math.ceil(atom.length / charsPerLine));
-
-        if (
-            currentLineCount + atomLines > maxLines &&
-            currentPageAtoms.length > 0
-        ) {
-            pages.push(currentPageAtoms.join("\n"));
-            currentPageAtoms = [];
-            currentLineCount = 0;
-        }
-        currentPageAtoms.push(atom);
-        currentLineCount += atomLines;
-    });
-
-    if (currentPageAtoms.length > 0) {
-        pages.push(currentPageAtoms.join("\n"));
-    }
-
-    return pages;
-}
-
 /**
  * 1秒ごとに実行する：ページはリロードせず、データファイルだけを読み直す
  */
