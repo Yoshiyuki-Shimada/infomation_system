@@ -26,12 +26,14 @@
         queryStartDate: null,
         queryEndDate: null,
         dateEditorOpen: false,
+        dateEditorView: "range",
         dateActiveField: "start",
         dateDigits: {
             start: "",
             end: "",
         },
         dateValidationMessage: "",
+        availableYears: [],
         loading: false,
         errorMessage: "",
         selectedRecord: null,
@@ -137,6 +139,80 @@
         return text || "数字で入力";
     }
 
+    function getAvailableDateYears() {
+        const years = dashboardState.availableYears
+            .map((value) => Number(value))
+            .filter((value) => Number.isInteger(value) && value > 0)
+            .sort((left, right) => left - right);
+        return [...new Set(years)];
+    }
+
+    function getNearestAvailableYear(year) {
+        const years = getAvailableDateYears();
+        if (years.length === 0 || years.includes(year)) return year;
+        return years.reduce((nearest, candidate) =>
+            Math.abs(candidate - year) < Math.abs(nearest - year)
+                ? candidate
+                : nearest,
+        );
+    }
+
+    function getDateEditorParts(field) {
+        const storedDate = digitsToDate(dashboardState.dateDigits[field]);
+        const fallbackDate = field === "start"
+            ? dashboardState.customStart
+            : dashboardState.customEnd;
+        const date = storedDate || fallbackDate || new Date();
+        return {
+            year: getNearestAvailableYear(date.getFullYear()),
+            month: date.getMonth() + 1,
+            day: date.getDate(),
+            hour: date.getHours(),
+            minute: date.getMinutes(),
+        };
+    }
+
+    function setDateEditorParts(field, parts) {
+        const lastDay = new Date(parts.year, parts.month, 0).getDate();
+        const day = Math.min(parts.day, lastDay);
+        dashboardState.dateDigits[field] = [
+            String(parts.year).padStart(4, "0"),
+            String(parts.month).padStart(2, "0"),
+            String(day).padStart(2, "0"),
+            String(parts.hour).padStart(2, "0"),
+            String(parts.minute).padStart(2, "0"),
+        ].join("");
+    }
+
+    function cycleDateValue(value, minimum, maximum, delta) {
+        const size = maximum - minimum + 1;
+        return ((value - minimum + delta) % size + size) % size + minimum;
+    }
+
+    function adjustDateEditorPart(part, delta) {
+        const field = dashboardState.dateActiveField;
+        const parts = getDateEditorParts(field);
+
+        if (part === "year") {
+            const years = getAvailableDateYears();
+            if (years.length > 0) {
+                const currentIndex = Math.max(0, years.indexOf(parts.year));
+                const nextIndex = cycleDateValue(currentIndex, 0, years.length - 1, delta);
+                parts.year = years[nextIndex];
+            }
+        }
+        if (part === "month") parts.month = cycleDateValue(parts.month, 1, 12, delta);
+        if (part === "day") {
+            const lastDay = new Date(parts.year, parts.month, 0).getDate();
+            parts.day = cycleDateValue(parts.day, 1, lastDay, delta);
+        }
+        if (part === "hour") parts.hour = cycleDateValue(parts.hour, 0, 23, delta);
+        if (part === "minute") parts.minute = cycleDateValue(parts.minute, 0, 59, delta);
+
+        setDateEditorParts(field, parts);
+        dashboardState.dateValidationMessage = "";
+        renderDashboard();
+    }
     function formatDateTimeForQuery(value) {
         if (!(value instanceof Date) || Number.isNaN(value.getTime())) return "";
         return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}T${String(value.getHours()).padStart(2, "0")}:${String(value.getMinutes()).padStart(2, "0")}:00`;
@@ -154,6 +230,16 @@
         const endDate = digitsToDate(endDigits);
         if (!startDate || !endDate) {
             return { ok: false, message: "実在する日付・時刻を入力してください。" };
+        }
+        const availableYears = getAvailableDateYears();
+        if (availableYears.length === 0) {
+            return { ok: false, message: "履歴データがないため、年を指定できません。" };
+        }
+        if (
+            !availableYears.includes(startDate.getFullYear()) ||
+            !availableYears.includes(endDate.getFullYear())
+        ) {
+            return { ok: false, message: "履歴データが存在する年を選択してください。" };
         }
         if (endDate < startDate) {
             return { ok: false, message: "終了日時は開始日時以降にしてください。" };
@@ -249,6 +335,9 @@
         dashboardState.history = append ? dashboardState.history.concat(rows) : rows;
         dashboardState.historyHasMore = Boolean(payload.hasMore) && rows.length > 0;
         dashboardState.errorMessage = payload.historyError || "";
+        dashboardState.availableYears = Array.isArray(payload.availableYears)
+            ? payload.availableYears
+            : [];
     }
 
     function filterHistory() {
@@ -471,17 +560,48 @@
         `;
     }
 
+    function buildDateStepperEditor() {
+        const field = dashboardState.dateActiveField;
+        const parts = getDateEditorParts(field);
+        const fields = [
+            ["year", parts.year, "年", 4],
+            ["month", parts.month, "月", 2],
+            ["day", parts.day, "日", 2],
+            ["hour", parts.hour, "時", 2],
+            ["minute", parts.minute, "分", 2],
+        ];
+        const columns = fields.map(([part, value, label, digits]) => `
+            <div class="network-date-stepper-column ${part === "year" ? "is-year" : ""}">
+                <button type="button" data-action="date-adjust" data-part="${part}" data-delta="1" aria-label="${label}を1増やす" ${part === "year" && getAvailableDateYears().length === 0 ? "disabled" : ""}>＋</button>
+                <div class="network-date-stepper-value">
+                    <strong>${escapeHtml(String(value).padStart(digits, "0"))}</strong>
+                    <span>${label}</span>
+                </div>
+                <button type="button" data-action="date-adjust" data-part="${part}" data-delta="-1" aria-label="${label}を1減らす" ${part === "year" && getAvailableDateYears().length === 0 ? "disabled" : ""}>－</button>
+            </div>
+        `).join("");
+        const otherField = field === "start" ? "end" : "start";
+        const otherLabel = field === "start" ? "終了日時の指定" : "開始日時の指定";
+
+        return `
+            <div class="network-date-modal-title">${field === "start" ? "開始日時" : "終了日時"}の入力</div>
+            <div class="network-date-stepper-grid">${columns}</div>
+            <div class="network-date-year-help">年は履歴データが存在する年だけ選択できます。</div>
+            ${dashboardState.dateValidationMessage ? `<div class="network-date-error">${escapeHtml(dashboardState.dateValidationMessage)}</div>` : ""}
+            <div class="network-date-modal-actions">
+                <button class="network-date-apply" type="button" data-action="date-stepper-confirm">確定</button>
+                <button class="network-date-switch" type="button" data-action="date-switch-field" data-field="${otherField}">${otherLabel}</button>
+            </div>
+        `;
+    }
+
     function buildDateRangeEditor() {
         if (!dashboardState.dateEditorOpen) return "";
         const activeField = dashboardState.dateActiveField;
-        const numberButtons = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]
-            .map((value) => `<button type="button" data-action="date-number" data-number="${value}">${value}</button>`)
-            .join("");
-
-        return `
-            <div class="network-date-modal-backdrop" data-action="close-date-editor"></div>
-            <div class="network-date-modal-dialog" role="dialog" aria-modal="true" aria-label="日時指定">
-                <div class="network-date-modal-title">対象期間を指定</div>
+        const content = dashboardState.dateEditorView === "stepper"
+            ? buildDateStepperEditor()
+            : `
+                <div class="network-date-modal-title">対象期間を設定</div>
                 <div class="network-date-field-grid">
                     <button class="network-date-field ${activeField === "start" ? "is-active" : ""}" type="button" data-action="date-field" data-field="start">
                         <span>開始日時</span><strong>${escapeHtml(formatDigitsForDisplay(dashboardState.dateDigits.start))}</strong>
@@ -490,21 +610,20 @@
                         <span>終了日時</span><strong>${escapeHtml(formatDigitsForDisplay(dashboardState.dateDigits.end))}</strong>
                     </button>
                 </div>
-                <div class="network-date-help">年月日時分を12桁で入力</div>
                 ${dashboardState.dateValidationMessage ? `<div class="network-date-error">${escapeHtml(dashboardState.dateValidationMessage)}</div>` : ""}
-                <div class="network-number-pad">
-                    ${numberButtons}
-                    <button type="button" data-action="date-backspace">消す</button>
-                    <button type="button" data-action="date-clear">クリア</button>
-                </div>
                 <div class="network-date-modal-actions">
                     <button class="network-date-apply" type="button" data-action="apply-date-range">適用</button>
                     <button class="network-date-cancel" type="button" data-action="close-date-editor">閉じる</button>
                 </div>
+            `;
+
+        return `
+            <div class="network-date-modal-backdrop" data-action="close-date-editor"></div>
+            <div class="network-date-modal-dialog ${dashboardState.dateEditorView === "stepper" ? "is-stepper" : ""}" role="dialog" aria-modal="true" aria-label="日時指定">
+                ${content}
             </div>
         `;
     }
-
     function buildErrorDetailModal() {
         const record = dashboardState.selectedRecord;
         if (!record) return "";
@@ -676,33 +795,25 @@
         dashboardState.range = "date";
         dashboardState.selectedRecord = null;
         dashboardState.dateEditorOpen = false;
+        dashboardState.dateEditorView = "range";
         dashboardState.dateValidationMessage = "";
         resetHistoryAndRefresh();
     }
 
-    function handleDateNumber(number) {
-        const field = dashboardState.dateActiveField;
-        dashboardState.dateDigits[field] = `${dashboardState.dateDigits[field]}${number}`.slice(0, 12);
+    function openDateStepper(field) {
+        dashboardState.dateActiveField = field === "end" ? "end" : "start";
+        const parts = getDateEditorParts(dashboardState.dateActiveField);
+        setDateEditorParts(dashboardState.dateActiveField, parts);
+        dashboardState.dateEditorView = "stepper";
         dashboardState.dateValidationMessage = "";
         renderDashboard();
     }
 
-    function handleDateBackspace() {
-        const field = dashboardState.dateActiveField;
-        dashboardState.dateDigits[field] = dashboardState.dateDigits[field].slice(0, -1);
+    function showDateRangeSummary() {
+        dashboardState.dateEditorView = "range";
         dashboardState.dateValidationMessage = "";
         renderDashboard();
     }
-
-    function handleDateClear() {
-        const field = dashboardState.dateActiveField;
-        dashboardState.dateDigits[field] = "";
-        if (field === "start") dashboardState.customStart = null;
-        if (field === "end") dashboardState.customEnd = null;
-        dashboardState.dateValidationMessage = "";
-        renderDashboard();
-    }
-
     networkButton.addEventListener("click", openDashboard);
     restartButton.addEventListener("click", openRestartConfirm);
 
@@ -745,6 +856,7 @@
                 dashboardState.dateDigits.start = dateToDigits(dashboardState.customStart || new Date(now.getTime() - 30 * 60 * 1000));
                 dashboardState.dateDigits.end = dateToDigits(dashboardState.customEnd || now);
                 dashboardState.dateActiveField = "start";
+                dashboardState.dateEditorView = "range";
                 dashboardState.dateValidationMessage = "";
                 dashboardState.dateEditorOpen = true;
                 renderDashboard();
@@ -764,14 +876,19 @@
             renderDashboardPreservingHistoryScroll();
         }
         if (action === "date-field") {
-            dashboardState.dateActiveField = actionElement.dataset.field || "start";
-            renderDashboard();
+            openDateStepper(actionElement.dataset.field || "start");
         }
-        if (action === "date-number") handleDateNumber(actionElement.dataset.number || "");
-        if (action === "date-backspace") handleDateBackspace();
-        if (action === "date-clear") handleDateClear();
+        if (action === "date-adjust") {
+            const delta = Number(actionElement.dataset.delta) < 0 ? -1 : 1;
+            adjustDateEditorPart(actionElement.dataset.part || "", delta);
+        }
+        if (action === "date-stepper-confirm") showDateRangeSummary();
+        if (action === "date-switch-field") {
+            openDateStepper(actionElement.dataset.field || "start");
+        }
         if (action === "close-date-editor") {
             dashboardState.dateEditorOpen = false;
+            dashboardState.dateEditorView = "range";
             dashboardState.dateValidationMessage = "";
             renderDashboard();
         }

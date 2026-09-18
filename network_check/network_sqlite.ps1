@@ -301,6 +301,32 @@ PRAGMA wal_checkpoint(TRUNCATE);
     Invoke-NetworkSqliteCommand -SqliteExePath $SqliteExePath -DatabasePath $DatabasePath -Sql $sql | Out-Null
 }
 
+function Read-NetworkSqliteAvailableYears {
+    param(
+        [string]$SqliteExePath,
+        [string]$DatabasePath,
+        [string]$TargetId
+    )
+
+    if (-not (Test-Path -LiteralPath $DatabasePath -PathType Leaf)) { return @() }
+
+    $whereSql = ""
+    if (-not [string]::IsNullOrWhiteSpace($TargetId)) {
+        $whereSql = "WHERE target_id = $(ConvertTo-NetworkSqliteTextLiteral $TargetId)"
+    }
+
+    $sql = @"
+SELECT DISTINCT CAST(substr(timestamp, 1, 4) AS INTEGER) AS year
+FROM network_measurements
+$whereSql
+ORDER BY year ASC;
+"@
+    $rows = Invoke-NetworkSqliteJsonQuery `
+        -SqliteExePath $SqliteExePath `
+        -DatabasePath $DatabasePath `
+        -Sql $sql
+    return @($rows | ForEach-Object { [int]$_.year } | Where-Object { $_ -gt 0 })
+}
 function Read-NetworkSqliteHistory {
     param(
         [string]$SqliteExePath,

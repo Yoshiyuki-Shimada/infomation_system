@@ -89,6 +89,7 @@
 /** 3時間ごとの天気予報・気温情報 */
 .weather_time_msg {
     display: block;
+    margin-top: 10px;
     min-height: 2.2em;
     font-size: 0.85rem;
     font-weight: bold;

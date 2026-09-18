@@ -760,6 +760,9 @@ function getImazatoLinerRowStatuses(bus, now = new Date()) {
         operation: operationStatus,
         progress:
             bus.suspensionFlg || hideDelayedProgress ? null : progressInfo,
+        grayOut:
+            bus.suspensionFlg ||
+            startDepartureStatus?.text === "発車情報未検出",
     };
 }
 function createImazatoLinerRow(bus, now = new Date()) {
@@ -776,7 +779,7 @@ function createImazatoLinerRow(bus, now = new Date()) {
     const destinationGuide = destinationGuides[guideMode];
 
     return `
-        <div class="bus-row liner-schedule-row">
+        <div class="bus-row liner-schedule-row${statuses.grayOut ? " bus-row-grayed" : ""}">
             <div class="time-block liner-time-block">
                 <div class="status operation-status liner-operation-status" style="color: ${statuses.operation?.color || "#e02135"};">${statuses.operation?.text || ""}</div>
                 <div class="scheduled-time liner-scheduled-time">${bus.time}</div>

@@ -193,6 +193,13 @@ html {
     border-top: none;
 }
 
+/* 対象便の時刻・系統・行先だけをグレー化し、ステータス・残り時間・アイコンは通常表示にする。 */
+.bus-row.bus-row-grayed > .time-block > .scheduled-time,
+.bus-row.bus-row-grayed > .line-number,
+.bus-row.bus-row-grayed > .destination-info {
+    filter: grayscale(1);
+    opacity: 0.45;
+}
 .time-block {
     width: 180px;
     height: 100%;

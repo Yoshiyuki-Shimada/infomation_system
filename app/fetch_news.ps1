@@ -373,7 +373,7 @@ while ($true) {
                 [string]$Detail.supplementary
             ) -join " "
 
-            if ($text -match "運転取り止めの可能性|運転取止めの可能性|取り止めの可能性|取止めの可能性") { return "orange" }
+            if ($text -match "運転見合わせの可能性|運転取り止めの可能性|運転取止めの可能性|取り止めの可能性|取止めの可能性") { return "orange" }
             if ($text -match "一部列車遅延・運休|一部列車運休・遅延|一部列車運休|一部列車に運休|部分運休") { return "yellow" }
             if ($text -match "見合わせ|取り止め|運休|運転休止") { return "red" }
             if ($SectionSeverity -ge 3) { return "red" }
@@ -568,7 +568,7 @@ while ($true) {
                         $secList += "$sectionPrefix$sectionStartStation$sectionSeparator$sectionEndStation（$sectionCondition）"
                     }
 
-                    if ($sectionCondition -match "運転取り止めの可能性|運転取止めの可能性|取り止めの可能性|取止めの可能性") { $maxSev = [Math]::Max($maxSev, 2) }
+                    if ($sectionCondition -match "運転見合わせの可能性|運転取り止めの可能性|運転取止めの可能性|取り止めの可能性|取止めの可能性|可能性あり") { $maxSev = [Math]::Max($maxSev, 2) }
                     elseif ($sectionCondition -match "見合わせ|取り止め|運休|運転休止") { $maxSev = 3 }
                     elseif ($sectionCondition -match "お知らせ|可能性|行き先変更|変更") { $maxSev = [Math]::Max($maxSev, 2) }
                 }
@@ -1169,24 +1169,27 @@ while ($true) {
 
         if ($currentCompareJson -eq $oldCompareJson) {
             $hasChanged = $false
-            Write-Host " [System] 取得データに変更なし。news_data.js は更新しません。" -ForegroundColor Yellow
+            Write-Host " [System] 取得データの内容に変更はありません。" -ForegroundColor Yellow
         }
     }
 
+    $data.updateTime = (Get-Date -Format "yyyy/MM/dd HH:mm")
     if ($hasChanged) {
-        $data.updateTime = (Get-Date -Format "yyyy/MM/dd HH:mm")
         Write-Host " [System] 新しいデータを検知しました。" -ForegroundColor Cyan
-
-        if (-not (Test-Path $tempDir)) {
-            New-Item -Path $tempDir -ItemType Directory | Out-Null
-            Write-Host " [System] temp フォルダを自動作成しました。" -ForegroundColor Yellow
-        }
-
-        $json = $data | ConvertTo-Json -Depth 10
-        "var signageData = $json;" | Out-File -FilePath $filePath -Encoding utf8 -Force
-
-        Write-Host "$(Get-Date -Format 'HH:mm:ss') news_data.js を更新しました。($filePath)" -ForegroundColor Cyan
     }
+    else {
+        Write-Host " [System] 取得データに変更なし。更新時刻のみ更新します。" -ForegroundColor DarkGray
+    }
+
+    if (-not (Test-Path $tempDir)) {
+        New-Item -Path $tempDir -ItemType Directory | Out-Null
+        Write-Host " [System] temp フォルダを自動作成しました。" -ForegroundColor Yellow
+    }
+
+    $json = $data | ConvertTo-Json -Depth 10
+    "var signageData = $json;" | Out-File -FilePath $filePath -Encoding utf8 -Force
+
+    Write-Host "$(Get-Date -Format 'HH:mm:ss') news_data.js を更新しました。($filePath)" -ForegroundColor Cyan
     # 5分ごとの情報取得
     Start-Sleep -Seconds 300
 }

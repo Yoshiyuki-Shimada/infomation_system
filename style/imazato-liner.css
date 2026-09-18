@@ -1296,3 +1296,94 @@
     font-weight: 700;
     line-height: 1.35;
 }
+
+/* 通信履歴の対象期間をタッチ操作で指定する日時ステッパー。 */
+.network-date-modal-dialog:not(.is-stepper) {
+    width: min(480px, calc(100vw - 160px));
+}
+
+.network-date-field-grid {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.network-date-modal-dialog.is-stepper {
+    width: min(650px, calc(100vw - 120px));
+}
+
+.network-date-stepper-grid {
+    display: grid;
+    grid-template-columns: 1.45fr repeat(4, minmax(0, 1fr));
+    gap: 14px;
+    align-items: center;
+}
+
+.network-date-stepper-column {
+    display: grid;
+    grid-template-rows: 50px 58px 50px;
+    gap: 10px;
+    min-width: 0;
+}
+
+.network-date-stepper-column button {
+    min-width: 0;
+    border: 2px solid var(--sky-blue);
+    background: #063a79;
+    color: var(--snow-white);
+    font-size: 1.55rem;
+    font-weight: 900;
+    touch-action: manipulation;
+}
+
+.network-date-stepper-column button:active {
+    background: var(--sky-yellow);
+    color: #000;
+}
+
+.network-date-stepper-value {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-width: 0;
+    border: 2px solid var(--snow-white);
+    background: #041a46;
+    color: var(--snow-white);
+}
+
+.network-date-stepper-value strong {
+    font-size: 1.5rem;
+    letter-spacing: 0;
+}
+
+.network-date-stepper-value span {
+    font-size: 1.05rem;
+    font-weight: 900;
+}
+
+.network-date-year-help {
+    margin-top: 14px;
+    color: var(--snow-gray-text);
+    font-size: 0.84rem;
+    text-align: center;
+}
+
+.network-date-switch {
+    min-width: 180px;
+    min-height: 46px;
+    border: 2px solid var(--sky-blue);
+    background: #063a79;
+    color: var(--snow-white);
+    font-size: 1rem;
+    font-weight: 900;
+    touch-action: manipulation;
+}
+
+.network-date-switch:active {
+    background: var(--sky-yellow);
+    color: #000;
+}
+.network-date-stepper-column button:disabled {
+    border-color: #687386;
+    background: #303744;
+    color: #9ca3af;
+}

@@ -821,7 +821,7 @@ function getLineNumberStyle(line) {
     const lineText = String(line || "");
     const lineColors = {
         "35": { background: "#019a66", color: "#fff" },
-        "35A": { background: "#00d084", color: "#fff" },
+        "35A": { background: "#9093E0", color: "#fff" },
         "73": { background: "#e44d93", color: "#fff" },
         "85": { background: "#a9cc51", color: "#000" },
         "13": { background: "#E60012", color: "#fff" },
@@ -1059,9 +1059,12 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
                 ? `<div class="char-container"><img src="img/${imgName}" class="${charIconClass}">${charStatusHtml}</div>`
                 : '<div class="char-container"></div>';
             const lineNumberStyle = getLineNumberStyle(bus.line);
+            const shouldGrayOutRow =
+                bus.suspensionFlg ||
+                startDepartureStatus?.text === "発車情報未検出";
 
             return `
-                <div class="bus-row">
+                <div class="bus-row${shouldGrayOutRow ? " bus-row-grayed" : ""}">
                     <div class="time-block">
                         <div class="status operation-status" style="color: ${operationInfo?.color || "#e02135"};">${operationInfo?.text || ""}</div>
                         <div class="scheduled-time">${bus.time}</div>
@@ -1094,7 +1097,7 @@ function createTransferGuideText(bus) {
     const message = getTransferGuideMessage(bus);
     if (!message) return "";
 
-    return `【${bus.time}発 ${destination}行きのご案内】＜乗換＞${message}`;
+    return `【${bus.time}発 ${bus.line}号系統 ${destination}行きのご案内】＜乗換＞${message}`;
 }
 
 function appendTransferGuideSpan(parent, text, className) {
@@ -1132,7 +1135,7 @@ function createTransferGuideItemElement(bus) {
     itemElement.className = "transfer-guide-item";
     appendTransferGuideSpan(
         itemElement,
-        `【${bus.time}発 ${destination}行きのご案内】＜乗換＞`,
+        `【${bus.time}発 ${bus.line}号系統 ${destination}行きのご案内】＜乗換＞`,
         "transfer-guide-text",
     );
     appendTransferGuideMessage(itemElement, message);

@@ -254,12 +254,25 @@ function Get-NetworkStatusJson {
         -ResultFilter $filterText `
         -Start $startText `
         -End $endText)
+    $availableYears = @()
+    try {
+        $availableYears = @(Read-NetworkSqliteAvailableYears `
+            -SqliteExePath $sqliteExePath `
+            -DatabasePath $networkDbPath `
+            -TargetId $targetId)
+    }
+    catch {
+        if ([string]::IsNullOrWhiteSpace($script:networkHistoryErrorMessage)) {
+            $script:networkHistoryErrorMessage = $_.Exception.Message
+        }
+    }
     return Get-JsonResponse ([ordered]@{
         ok = $true
         summary = Read-NetworkSummary
         history = @($historyRows)
         hasMore = ($historyRows.Count -ge $limit)
         historyError = $script:networkHistoryErrorMessage
+        availableYears = @($availableYears)
         database = [ordered]@{
             type = "SQLite"
             path = $networkDbPath

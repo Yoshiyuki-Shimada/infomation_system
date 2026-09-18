@@ -9,6 +9,7 @@ const SCROLL_END_WAIT_MS = 10000;
 const SCROLL_START_DELAY_MS = 10000;
 const EMERGENCY_INFO_FRAME_INTERVAL_MS = 5000;
 const EMERGENCY_RECENT_REPEAT_MS = 5 * 60 * 1000;
+const SIGNAGE_DATA_MAX_TIME_OFFSET_MS = 30 * 60 * 1000;
 
 /** 表示される情報を格納するリスト */
 let slideList = [];
@@ -167,17 +168,57 @@ function getUpdateSignature(value) {
     }
 }
 
+function parseSignageDataUpdateTime(value) {
+    const match = String(value || "").match(
+        /^(\d{4})\/(\d{2})\/(\d{2}) (\d{2}):(\d{2})$/,
+    );
+    if (!match) return null;
+
+    const updateTime = new Date(
+        Number(match[1]),
+        Number(match[2]) - 1,
+        Number(match[3]),
+        Number(match[4]),
+        Number(match[5]),
+        0,
+        0,
+    );
+    if (Number.isNaN(updateTime.getTime())) return null;
+
+    const hasExactComponents =
+        updateTime.getFullYear() === Number(match[1]) &&
+        updateTime.getMonth() === Number(match[2]) - 1 &&
+        updateTime.getDate() === Number(match[3]) &&
+        updateTime.getHours() === Number(match[4]) &&
+        updateTime.getMinutes() === Number(match[5]);
+    return hasExactComponents ? updateTime : null;
+}
+
+function isSignageDataCurrent(data, now = new Date()) {
+    const updateTime = parseSignageDataUpdateTime(data?.updateTime);
+    if (!updateTime) return false;
+
+    return (
+        Math.abs(now.getTime() - updateTime.getTime()) <=
+        SIGNAGE_DATA_MAX_TIME_OFFSET_MS
+    );
+}
+
 function updateSignage() {
     const activeEarthquakeData = getActiveEarthquakeData();
-    const hasSignageData = typeof signageData !== "undefined" && signageData !== null;
+    const hasLoadedSignageData =
+        typeof signageData !== "undefined" && signageData !== null;
+    const hasCurrentSignageData =
+        hasLoadedSignageData && isSignageDataCurrent(signageData);
 
-    if (!hasSignageData && !activeEarthquakeData) {
+    if (!hasCurrentSignageData && !activeEarthquakeData) {
         lastUpdateTime = "";
         infoDataFailed();
         return;
     }
 
-    if (!hasSignageData) {
+    // 古いnews_dataは破棄し、別ファイルで受信した緊急情報だけを継続表示する。
+    if (!hasCurrentSignageData) {
         window.signageData = {
             updateTime: "",
             tsunami: [],
