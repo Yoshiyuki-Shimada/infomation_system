@@ -484,7 +484,7 @@ while ($true) {
         function Get-JRWestMatchedLimitedExpressNames {
             param($Line, $Detail)
 
-            $targets = @("こうのとり", "はまかぜ", "きのさき", "はしだて", "まいづる", "はるか", "くろしお", "サンダーバード", "らくラクびわこ", "らくラクはりま", "らくラクやまと", "まほろば", "はくと", "スーパーはくと", "寝台列車", "サンライズ瀬戸", "サンライズ出雲", "サンライズ瀬戸・出雲")
+            $targets = @("こうのとり", "はまかぜ", "きのさき", "はしだて", "まいづる", "はるか", "くろしお", "サンダーバード", "らくラクびわこ", "らくラクはりま", "らくラクやまと", "まほろば", "スーパーはくと", "サンライズ瀬戸", "サンライズ出雲", "サンライズ瀬戸・出雲")
             $searchText = Get-JRWestDetailSearchText -Line $Line -Detail $Detail
             return @($targets | Where-Object { $searchText -match [regex]::Escape($_) })
         }
