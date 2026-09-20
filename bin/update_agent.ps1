@@ -293,6 +293,27 @@ function Stop-SignageProcesses {
         }
 }
 
+function Ensure-NewsFetcherRunning {
+    $launcherPath = Join-Path $projectDir "bin\start_news_fetcher.ps1"
+    if (-not (Test-Path -LiteralPath $launcherPath -PathType Leaf)) { return }
+
+    $isRunning = Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" -ErrorAction SilentlyContinue |
+        Where-Object {
+            ([string]$_.CommandLine).IndexOf(
+                "start_news_fetcher.ps1",
+                [StringComparison]::OrdinalIgnoreCase
+            ) -ge 0
+        } |
+        Select-Object -First 1
+    if ($isRunning) { return }
+
+    Start-Process `
+        -FilePath "powershell.exe" `
+        -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$launcherPath`"" `
+        -WindowStyle Hidden
+    Write-UpdateLog "ニュース取得ランチャーを起動しました。"
+}
+
 function Start-UpdateScreen {
     Hide-WindowsTaskbar
     $edgePath = Get-EdgePath
@@ -489,6 +510,7 @@ try {
     }
 
     while ($true) {
+        Ensure-NewsFetcherRunning
         Export-InformationLogs
 
         $requests = Get-ChildItem -LiteralPath $WatchPath -Filter "*.ready.json" -File -ErrorAction SilentlyContinue |
