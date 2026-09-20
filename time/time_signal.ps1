@@ -878,6 +878,18 @@ function Start-Time-Signal {
     [void](Play-Sound $minFile)
 }
 # メインループ（秒同期）
+try {
+    # 表示画面のキャッシュ状態に依存せず、常駐APIの起動時に情報取得処理を保証する。
+    $fetcherStartup = Start-NewsFetcherIfNeeded
+    if (-not $fetcherStartup.ok) {
+        Write-TimeSignalLog -Level "WARN" -Message "ニュース取得ランチャーを起動できませんでした: $($fetcherStartup.error)"
+    }
+}
+catch {
+    # 情報取得の起動失敗で、時報・通信監視APIまで停止させない。
+    Write-TimeSignalLog -Level "WARN" -Message "ニュース取得ランチャーの起動確認に失敗しました: $($_.Exception.Message)"
+}
+
 Start-TimeSignalControlServer
 while ($true) {
     # HTTP制御に待たされても時報枠を逃さないよう、時報判定を先に行う。
