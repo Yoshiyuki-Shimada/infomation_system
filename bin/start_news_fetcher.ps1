@@ -10,6 +10,14 @@ $fetchScriptPath = Join-Path $projectDir "app\fetch_news.ps1"
 $logDir = Join-Path $projectDir "logs\information"
 $logPath = Join-Path $logDir ("fetcher_{0}.jsonl" -f (Get-Date -Format "yyyyMMdd"))
 $networkProbeHost = "api.open-meteo.com"
+$launcherMutex = [Threading.Mutex]::new($false, "Global\InfomationSystemNewsFetcher")
+
+if (-not $launcherMutex.WaitOne(0, $false)) {
+    $launcherMutex.Dispose()
+    exit 0
+}
+
+try {
 
 function Ensure-LogDirectory {
     if (-not (Test-Path -LiteralPath $logDir -PathType Container)) {
@@ -77,4 +85,9 @@ while ($true) {
     }
 
     Start-Sleep -Seconds $ProcessRetrySeconds
+}
+}
+finally {
+    try { $launcherMutex.ReleaseMutex() | Out-Null } catch {}
+    $launcherMutex.Dispose()
 }

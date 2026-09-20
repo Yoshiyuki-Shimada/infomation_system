@@ -20,6 +20,7 @@ $configPath = Join-Path -Path $PSScriptRoot -ChildPath "update_config.json"
 $defaultWatchPath = "C:\infomation_system_updates\inbox"
 $mutex = [Threading.Mutex]::new($false, "Global\InfomationSystemUpdateAgent")
 $authToken = ""
+$lastNewsFetcherStartAttempt = [datetime]::MinValue
 
 function Ensure-Directory {
     param([string]$Path)
@@ -297,16 +298,11 @@ function Ensure-NewsFetcherRunning {
     $launcherPath = Join-Path $projectDir "bin\start_news_fetcher.ps1"
     if (-not (Test-Path -LiteralPath $launcherPath -PathType Leaf)) { return }
 
-    $isRunning = Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" -ErrorAction SilentlyContinue |
-        Where-Object {
-            ([string]$_.CommandLine).IndexOf(
-                "start_news_fetcher.ps1",
-                [StringComparison]::OrdinalIgnoreCase
-            ) -ge 0
-        } |
-        Select-Object -First 1
-    if ($isRunning) { return }
+    $now = Get-Date
+    if (($now - $script:lastNewsFetcherStartAttempt).TotalSeconds -lt 30) { return }
+    $script:lastNewsFetcherStartAttempt = $now
 
+    # ランチャー自身の名前付きミューテックスで多重起動を防ぐ。
     Start-Process `
         -FilePath "powershell.exe" `
         -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$launcherPath`"" `
