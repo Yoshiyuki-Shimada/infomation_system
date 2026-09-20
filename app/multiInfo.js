@@ -13,6 +13,7 @@ const SIGNAGE_DATA_MAX_TIME_OFFSET_MS = 30 * 60 * 1000;
 const INFORMATION_DISPLAY_LOG_URL =
     "http://127.0.0.1:18765/time-signal/information/display-log";
 const DISPLAY_LOG_DUPLICATE_WINDOW_MS = 5000;
+const DATA_RELOAD_TIMEOUT_MS = 10000;
 
 let lastDisplayLogKey = "";
 let lastDisplayLogAt = 0;
@@ -26,6 +27,10 @@ let pendingSignageData = null;
 let pendingSignageSignature = "";
 let pendingNonNewsApplied = false;
 let activeEarthquakeSignature = "";
+let hasRenderedActiveSignage = false;
+let dataReloadInProgress = false;
+let dataReloadStartedAt = 0;
+let dataReloadRequestId = 0;
 
 const container = document.getElementById("slide-container");
 const idleView = document.getElementById("idle-view");
@@ -337,6 +342,7 @@ function updateSignage() {
         pendingSignageData = null;
         pendingSignageSignature = "";
         pendingNonNewsApplied = false;
+        hasRenderedActiveSignage = false;
         infoDataFailed();
         return;
     }
@@ -393,6 +399,10 @@ function updateSignage() {
 
     // 読み込んだ最新データはサイクル境界まで保留し、表示中データへ戻す。
     window.signageData = activeSignageData;
+    if (!hasRenderedActiveSignage) {
+        renderActiveSignage(0);
+        return;
+    }
     if (earthquakeSignature !== activeEarthquakeSignature) {
         const currentCycle = getSlideCycleRange(currentSlide)?.cycleIndex || 0;
         renderActiveSignage(currentCycle);
@@ -400,6 +410,7 @@ function updateSignage() {
 }
 
 function renderActiveSignage(startCycleIndex = 0) {
+    hasRenderedActiveSignage = false;
     const activeEarthquakeData = getActiveEarthquakeData();
     window.signageData = activeSignageData;
     activeSignageSignature = getSignageContentSignature(activeSignageData);
@@ -491,6 +502,7 @@ function renderActiveSignage(startCycleIndex = 0) {
             currentSlide = startRange?.start || 0;
             showSlide();
         }
+        hasRenderedActiveSignage = true;
     } else {
         infoDataFailed();
     }
@@ -907,6 +919,7 @@ function importWeatherData() {
 
 /* インフォデータの取得失敗時 */
 function infoDataFailed() {
+    hasRenderedActiveSignage = false;
     clearSlideTimer();
     clearEmergencyInfoTimer();
     const idleView = document.getElementById("idle-view");
@@ -1186,22 +1199,26 @@ function prepareAutoScroll(slide) {
 /**
  * 1秒ごとに実行する：ページはリロードせず、データファイルだけを読み直す
  */
-function loadEarthquakeDataThenUpdate() {
+function loadEarthquakeDataThenUpdate(requestId) {
+    if (requestId !== dataReloadRequestId) return;
+
     const oldEarthquakeScript = document.getElementById("earthquake-data-script");
     if (oldEarthquakeScript) oldEarthquakeScript.remove();
 
     const earthquakeScript = document.createElement("script");
     earthquakeScript.id = "earthquake-data-script";
     earthquakeScript.src = `temp/earthquake_data.js?v=${Date.now()}`;
-    earthquakeScript.onload = () => updateSignage();
+    earthquakeScript.onload = () => finishDataReloadAndUpdate(requestId);
     earthquakeScript.onerror = () => {
         window.earthquakeData = undefined;
-        updateSignage();
+        finishDataReloadAndUpdate(requestId);
     };
     document.body.appendChild(earthquakeScript);
 }
 
-function loadSignageDataThenUpdate() {
+function loadSignageDataThenUpdate(requestId) {
+    if (requestId !== dataReloadRequestId) return;
+
     const oldScript = document.getElementById("data-script");
     if (oldScript) oldScript.remove();
 
@@ -1209,28 +1226,59 @@ function loadSignageDataThenUpdate() {
     script.id = "data-script";
     script.src = `temp/news_data.js?v=${Date.now()}`;
 
-    script.onload = () => loadEarthquakeDataThenUpdate();
+    script.onload = () => loadEarthquakeDataThenUpdate(requestId);
     script.onerror = () => {
         window.signageData = undefined;
-        loadEarthquakeDataThenUpdate();
+        loadEarthquakeDataThenUpdate(requestId);
     };
 
     document.body.appendChild(script);
 }
 
 function fetchNewData() {
+    const now = Date.now();
+    if (
+        dataReloadInProgress &&
+        now - dataReloadStartedAt < DATA_RELOAD_TIMEOUT_MS
+    ) {
+        return;
+    }
+
+    dataReloadInProgress = true;
+    dataReloadStartedAt = now;
+    const requestId = ++dataReloadRequestId;
     const oldStatusScript = document.getElementById("news-status-script");
     if (oldStatusScript) oldStatusScript.remove();
 
     const statusScript = document.createElement("script");
     statusScript.id = "news-status-script";
     statusScript.src = `temp/news_status.js?v=${Date.now()}`;
-    statusScript.onload = () => loadSignageDataThenUpdate();
+    statusScript.onload = () => loadSignageDataThenUpdate(requestId);
     statusScript.onerror = () => {
         window.signageFetchStatus = undefined;
-        loadSignageDataThenUpdate();
+        loadSignageDataThenUpdate(requestId);
     };
     document.body.appendChild(statusScript);
+}
+
+function updateSignageWithRetryLogging() {
+    try {
+        updateSignage();
+    } catch (error) {
+        hasRenderedActiveSignage = false;
+        console.error("情報表示の更新に失敗しました。次回再試行します。", error);
+    }
+}
+
+function finishDataReloadAndUpdate(requestId) {
+    if (requestId !== dataReloadRequestId) return;
+
+    try {
+        updateSignageWithRetryLogging();
+    } finally {
+        dataReloadInProgress = false;
+        dataReloadStartedAt = 0;
+    }
 }
 
 

@@ -34,13 +34,20 @@ scheduleLoadPromise
 
 // スライド切り替えは、各スライドの表示時間に合わせて showSlide 側で予約します
 
-// 1秒ごとにデータ再取得実行
-setInterval(fetchNewData, 1000);
+function startInformationDataUpdates() {
+    updateSignageWithRetryLogging();
+    fetchNewData();
+    setInterval(fetchNewData, 1000);
+}
 
-// 初回起動
-window.onload = () => {
-    updateSignage();
-};
+// 画像などのload完了を待たず、DOM構築直後から情報取得を開始する。
+if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", startInformationDataUpdates, {
+        once: true,
+    });
+} else {
+    startInformationDataUpdates();
+}
 
 //モニターがTVのときのCSS読み込み
 const link = document.createElement("link");
