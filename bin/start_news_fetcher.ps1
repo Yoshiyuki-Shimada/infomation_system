@@ -7,8 +7,8 @@ $ErrorActionPreference = "Stop"
 
 $projectDir = Split-Path -Path $PSScriptRoot -Parent
 $fetchScriptPath = Join-Path $projectDir "app\fetch_news.ps1"
-$logDir = Join-Path $projectDir "logs"
-$logPath = Join-Path $logDir "fetch_news_launcher.log"
+$logDir = Join-Path $projectDir "logs\information"
+$logPath = Join-Path $logDir ("fetcher_{0}.jsonl" -f (Get-Date -Format "yyyyMMdd"))
 $networkProbeHost = "api.open-meteo.com"
 
 function Ensure-LogDirectory {
@@ -21,7 +21,12 @@ function Write-LauncherLog {
     param([string]$Message)
 
     Ensure-LogDirectory
-    $line = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $Message"
+    $record = [ordered]@{
+        loggedAt = (Get-Date).ToString("o")
+        source   = "start_news_fetcher.ps1"
+        message  = $Message
+    }
+    $line = $record | ConvertTo-Json -Compress
     Add-Content -LiteralPath $logPath -Value $line -Encoding UTF8
 }
 
