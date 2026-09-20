@@ -996,32 +996,60 @@ function getImazatoLinerRemainingInfo(bus, now = new Date()) {
     };
 }
 
-function getImazatoLinerDelayProgressInfo(bus, now, remainingInfo) {
+function getImazatoLinerDelayProgressInfo(
+    bus,
+    now,
+    remainingInfo,
+    startDepartureStatus,
+) {
     const hasDelay =
         Number(bus.delayMinutes) >= 3 || Number(bus.delayEstimateMinutes) >= 3;
-    if (!hasDelay) return remainingInfo;
-
     const scheduledSeconds = getSecondsUntilImazatoLiner(bus.time, now);
-    if (scheduledSeconds > 600) return remainingInfo;
+    const forecastTime = bus.predictedTime || bus.delayEstimateTime;
+    const estimatedSeconds = forecastTime
+        ? getSecondsUntilImazatoLiner(forecastTime, now)
+        : null;
+    const hasStartDepartureProblem = [
+        "始発発車未検知",
+        "発車情報未検出",
+        "始発発車遅れ見込み",
+    ].includes(startDepartureStatus?.text);
+    const delayIconIsDisplayed =
+        scheduledSeconds < 10 * 60 &&
+        ((hasDelay &&
+            estimatedSeconds !== null &&
+            estimatedSeconds < 13 * 60) ||
+            hasStartDepartureProblem);
 
-    const displayTime = getImazatoLinerDisplayBaseTime(bus, now);
-    const estimatedSeconds = getSecondsUntilImazatoLiner(displayTime, now);
-    if (estimatedSeconds >= 0 && estimatedSeconds <= 720) {
+    if (!delayIconIsDisplayed) return remainingInfo;
+
+    const isStartDepartureUndetectedStatus = [
+        "始発発車未検知",
+        "発車情報未検出",
+    ].includes(startDepartureStatus?.text);
+    if (isStartDepartureUndetectedStatus) return null;
+
+    if (
+        estimatedSeconds !== null &&
+        estimatedSeconds >= 0 &&
+        estimatedSeconds < 13 * 60
+    ) {
         return { text: "まもなく", color: "#ee7b1a" };
     }
-    if (estimatedSeconds > 720) return null;
 
-    return remainingInfo;
+    return null;
 }
 
 function getImazatoLinerRowStatuses(bus, now = new Date()) {
     const cycleSeconds = Math.floor(Date.now() / 1000) % 12;
     const fallbackStatus = getImazatoLinerTimetableFallbackStatus(bus);
+    const startDepartureStatus = getImazatoLinerStartDepartureStatus(bus, now);
     const remainingInfo = getImazatoLinerRemainingInfo(bus, now);
     const progressInfo = getImazatoLinerDelayProgressInfo(
         bus,
         now,
         remainingInfo,
+        startDepartureStatus,
     );
     const delayEstimateInfo =
         Number(bus.delayEstimateMinutes) >= 5
@@ -1030,7 +1058,6 @@ function getImazatoLinerRowStatuses(bus, now = new Date()) {
                   color: "#e02135",
               }
             : null;
-    const startDepartureStatus = getImazatoLinerStartDepartureStatus(bus, now);
     const delayStatus =
         Number(bus.delayMinutes) >= 3
             ? { text: `約${bus.delayMinutes}分遅れ`, color: "#e02135" }
@@ -1052,14 +1079,10 @@ function getImazatoLinerRowStatuses(bus, now = new Date()) {
                 : serviceStatus
             : serviceStatus || lastStatus;
     const scheduledSeconds = getSecondsUntilImazatoLiner(bus.time, now);
-    const hideDelayedProgress =
-        scheduledSeconds < 480 &&
-        Boolean(delayEstimateInfo || startDepartureStatus || delayStatus);
 
     return {
         operation: operationStatus,
-        progress:
-            bus.suspensionFlg || hideDelayedProgress ? null : progressInfo,
+        progress: bus.suspensionFlg ? null : progressInfo,
         grayOut: shouldGrayOutImazatoLinerRow(
             bus,
             startDepartureStatus,

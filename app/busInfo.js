@@ -1116,6 +1116,23 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
                 now,
                 opDate,
             ).pure_seconds;
+            const delayIconName = getBusDelayIconName(
+                bus,
+                startDepartureStatus,
+                diff_sec_pure,
+                now,
+                opDate,
+            );
+            const isStartDepartureUndetectedStatus = [
+                "始発発車未検知",
+                "発車情報未検出",
+            ].includes(startDepartureStatus?.text);
+            const delayIconControlsProgress = delayIconName === "delay.png";
+            const showSoon =
+                delayIconControlsProgress &&
+                !isStartDepartureUndetectedStatus &&
+                predictedSeconds >= 0 &&
+                predictedSeconds < 9 * 60;
             const delayStatusInfo = bus.suspensionFlg
                 ? null
                 : startDepartureStatus ||
@@ -1130,13 +1147,6 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
                 : null;
             const isWithinDetailWindow =
                 (diff >= 0 || hasMajorDelay) && diff_sec_pure <= 900;
-            const isScheduledInSoonWindow =
-                hasMajorDelay && diff_sec_pure <= 270;
-            const predictionWithinSevenMinutes = predictedSeconds <= 420;
-            const showSoon =
-                isScheduledInSoonWindow && predictionWithinSevenMinutes;
-            const delayOnly =
-                isScheduledInSoonWindow && !predictionWithinSevenMinutes;
 
             engText = engModeChange(engMode, info, bus.msg);
 
@@ -1157,8 +1167,7 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
                 !suspensionInfo &&
                 diff_sec_pure >= 0 &&
                 diff_sec_pure < 3600 &&
-                !delayOnly &&
-                !showSoon &&
+                !delayIconControlsProgress &&
                 remainingResult
                     ? {
                           text: remainingResult.text,
@@ -1196,13 +1205,6 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
             progressInfo = showSoon
                 ? { text: "まもなく", color: "#ee7b1a" }
                 : remainingInfo;
-            const delayIconName = getBusDelayIconName(
-                bus,
-                startDepartureStatus,
-                diff_sec_pure,
-                now,
-                opDate,
-            );
             if (bus.suspensionFlg) {
                 imgName = "suspension.png";
             } else if (delayIconName) {
