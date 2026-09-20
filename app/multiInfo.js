@@ -1220,6 +1220,14 @@ function prepareAutoScroll(slide) {
 /**
  * 1秒ごとに実行する：ページはリロードせず、データファイルだけを読み直す
  */
+function getReloadableDataScriptSource(path) {
+    const url = new URL(path, document.baseURI);
+    if (url.protocol !== "file:") {
+        url.searchParams.set("v", String(Date.now()));
+    }
+    return url.href;
+}
+
 function loadEarthquakeDataThenUpdate(requestId) {
     if (requestId !== dataReloadRequestId) return;
 
@@ -1228,7 +1236,9 @@ function loadEarthquakeDataThenUpdate(requestId) {
 
     const earthquakeScript = document.createElement("script");
     earthquakeScript.id = "earthquake-data-script";
-    earthquakeScript.src = `temp/earthquake_data.js?v=${Date.now()}`;
+    earthquakeScript.src = getReloadableDataScriptSource(
+        "temp/earthquake_data.js",
+    );
     earthquakeScript.onload = () => finishDataReloadAndUpdate(requestId);
     earthquakeScript.onerror = () => {
         window.earthquakeData = undefined;
@@ -1245,7 +1255,7 @@ function loadSignageDataThenUpdate(requestId) {
 
     const script = document.createElement("script");
     script.id = "data-script";
-    script.src = `temp/news_data.js?v=${Date.now()}`;
+    script.src = getReloadableDataScriptSource("temp/news_data.js");
 
     script.onload = () => loadEarthquakeDataThenUpdate(requestId);
     script.onerror = () => {
@@ -1254,6 +1264,23 @@ function loadSignageDataThenUpdate(requestId) {
     };
 
     document.body.appendChild(script);
+}
+
+function loadStatusDataThenUpdate(requestId) {
+    if (requestId !== dataReloadRequestId) return;
+
+    const oldStatusScript = document.getElementById("news-status-script");
+    if (oldStatusScript) oldStatusScript.remove();
+
+    const statusScript = document.createElement("script");
+    statusScript.id = "news-status-script";
+    statusScript.src = getReloadableDataScriptSource("temp/news_status.js");
+    statusScript.onload = () => loadSignageDataThenUpdate(requestId);
+    statusScript.onerror = () => {
+        window.signageFetchStatus = undefined;
+        loadSignageDataThenUpdate(requestId);
+    };
+    document.body.appendChild(statusScript);
 }
 
 async function fetchNewData() {
@@ -1288,7 +1315,7 @@ async function fetchNewData() {
             "ローカルAPIから情報データを取得できないため、ファイル読込を再試行します。",
             error,
         );
-        loadSignageDataThenUpdate(requestId);
+        loadStatusDataThenUpdate(requestId);
     }
 }
 
