@@ -27,6 +27,39 @@ const TRAIN_COMPANY = {
     OTHERS: 1,
 };
 
+/** Yahoo!運行情報の路線IDと私鉄路線アイコンの対応表 */
+const PRIVATE_RAILWAY_SYMBOLS = {
+    321: ["osaka_metro/midousuji_line.png", "御堂筋線"],
+    324: ["osaka_metro/chuo_line.png", "中央線"],
+    537: ["osaka_metro/imazatosuji_line.png", "今里筋線"],
+    327: [
+        "osaka_metro/nagahori_tsurumi-ryokuti_line.png",
+        "長堀鶴見緑地線",
+    ],
+    320: ["osaka_metro/nankou_port_line.png", "南港ポートタウン線"],
+    326: ["osaka_metro/sakaisuji_line.png", "堺筋線"],
+    325: ["osaka_metro/sennichimae_line.png", "千日前線"],
+    322: ["osaka_metro/tanimachi_line.png", "谷町線"],
+    323: ["osaka_metro/yotsubashi_line.png", "四つ橋線"],
+    284: ["kintetsu/kintetsu_osaka_line.png", "近鉄大阪線"],
+    285: ["kintetsu/kintetsu_nara_line.png", "近鉄奈良線"],
+    295: ["kintetsu/kintetsu_minami_osaka_line.png", "近鉄南大阪線"],
+    287: ["kintetsu/kintetsu_keihanna_line.png", "近鉄けいはんな線"],
+    339: ["nankai/nankai_main_line.png", "南海本線"],
+    340: ["nankai/nankai_airport_line.png", "南海空港線"],
+    347: ["nankai/nankai_shiomibashi_line.png", "南海汐見橋線"],
+    306: ["hankyu/hankyu_kyoto_line.png", "阪急京都線系統"],
+    313: ["hankyu/hankyu_kyoto_line.png", "阪急京都線系統"],
+    310: ["hankyu/hankyu_kobe_line.png", "阪急神戸線系統"],
+    311: ["hankyu/hankyu_takaraduka_line.png", "阪急宝塚線系統"],
+    300: ["keihan/keihan.png", "京阪線"],
+    315: ["hanshin/hanshin.png", "阪神線"],
+    316: ["hanshin/hanshin.png", "阪神線"],
+    623: ["hanshin/hanshin.png", "阪神線"],
+    354: ["sanyo/sanyo_railway.png", "山陽電車"],
+    7: ["tokaido_shinkansen/tokaido_shinkansen.png", "東海道新幹線"],
+};
+
 /** 地震・津波情報を保管する配列 */
 let emergencyList;
 
@@ -42,12 +75,50 @@ let newsArticles;
 /** 天気予報を保管する配列 */
 let weatherList;
 
+/** Google Calendarの予定情報を保管する配列 */
+let scheduleList;
+
+/**
+ * 路線記号の画像HTMLを生成する
+ */
+function createLineSymbolImageHtml(src, alt) {
+    return `<img src="${src}" class="jr-line-symbol" alt="${alt}">`;
+}
+
+function createJrLineSymbolImageHtml(area, symbol) {
+    return createLineSymbolImageHtml(
+        `img/JRLinesImage/${area}/${symbol}.png`,
+        symbol,
+    );
+}
+
+function getPrivateRailwaySymbolHtml(lineId) {
+    const symbol = PRIVATE_RAILWAY_SYMBOLS[String(lineId || "")];
+    if (!symbol) return "";
+
+    return createLineSymbolImageHtml(
+        `img/private_railway_image/${symbol[0]}`,
+        symbol[1],
+    );
+}
+
 /**
  * 路線名から路線記号の画像HTMLを生成する
  */
-function getLineSymbolHtml(lineName, contextText = "", lineCode) {
+function getLineSymbolHtml(lineName, contextText = "", lineCode, lineId = "") {
     if (!lineName) return "";
+    if (lineCode == TRAIN_COMPANY.OTHERS) {
+        return getPrivateRailwaySymbolHtml(lineId);
+    }
     if (lineCode != TRAIN_COMPANY.JR_WEST) return "";
+
+    if (lineName.includes("山陽新幹線")) {
+        return createJrLineSymbolImageHtml(
+            "sanyo_shinkansen",
+            "sanyo-shinkansen",
+        );
+    }
+
     let icons = "";
     //console.log("line-name" + contextText);
 
@@ -64,12 +135,8 @@ function getLineSymbolHtml(lineName, contextText = "", lineCode) {
                 contextText,
             );
 
-        const imgStyle =
-            "height: 1.0em; vertical-align: middle; margin-right: 5px;";
-        if (isE)
-            icons += `<img src="img/JRLinesImage/keihanshin_area/E.png" style="${imgStyle}">`;
-        if (isA)
-            icons += `<img src="img/JRLinesImage/yonago_area/A.png" style="${imgStyle}">`;
+        if (isE) icons += createJrLineSymbolImageHtml("keihanshin_area", "E");
+        if (isA) icons += createJrLineSymbolImageHtml("yonago_area", "A");
 
         return icons;
     }
@@ -144,7 +211,7 @@ function getLineSymbolHtml(lineName, contextText = "", lineCode) {
     );
 
     if (found) {
-        return `<img src="img/JRLinesImage/${found.area}/${found.symbol}.png"style="height: 1.0em; vertical-align: middle; margin-right: 6px;">`;
+        return createJrLineSymbolImageHtml(found.area, found.symbol);
     }
     return "";
 }
@@ -195,7 +262,11 @@ function parseSignageDataUpdateTime(value) {
 }
 
 function isSignageDataCurrent(data, now = new Date()) {
-    const updateTime = parseSignageDataUpdateTime(data?.updateTime);
+    const fetchStatus =
+        typeof signageFetchStatus !== "undefined" ? signageFetchStatus : null;
+    const updateTime = parseSignageDataUpdateTime(
+        fetchStatus?.updateTime || data?.updateTime,
+    );
     if (!updateTime) return false;
 
     return (
@@ -229,11 +300,12 @@ function updateSignage() {
             news: [],
             weather: null,
             weeklyWeather: null,
+            calendarSchedule: null,
         };
     }
 
-    const railwayUpdateSignature = getUpdateSignature(signageData.railway || []);
-    const updateKey = `${signageData.updateTime || ""}|${railwayUpdateSignature}|${activeEarthquakeData?.updateTime || ""}`;
+    const signageUpdateSignature = getUpdateSignature(signageData);
+    const updateKey = `${signageUpdateSignature}|${activeEarthquakeData?.updateTime || ""}`;
     if (updateKey === lastUpdateTime) return;
 
     console.log("最終更新:" + lastUpdateTime);
@@ -246,6 +318,7 @@ function updateSignage() {
     railwayList = [];
     newsArticles = [];
     weatherList = [];
+    scheduleList = [];
 
     currentSlide = 0;
 
@@ -256,12 +329,18 @@ function updateSignage() {
     importWeatherWarningData();
     importEvacuationData();
     importRailwayInfoData();
+    importCalendarScheduleData();
     importNewsData();
     importWeatherData();
 
     slideList = [];
 
-    const importantInfo = [...emergencyList, ...evacuationList, ...railwayList];
+    const importantInfo = [
+        ...emergencyList,
+        ...evacuationList,
+        ...railwayList,
+        ...scheduleList,
+    ];
     const isDisasterPriority = activeEarthquakeData?.priorityMode === "disaster";
     const hasEarthquakeBottomBanner = activeEarthquakeData?.priorityMode === "bottom" || !!activeEarthquakeData?.emergencyMode?.active;
 
@@ -388,6 +467,13 @@ function importWeatherWarningData() {
             warnings,
         }),
     );
+}
+
+/** Google Calendarの本日・週間予定を重要情報として取り込む。 */
+function importCalendarScheduleData() {
+    const schedule = signageData.calendarSchedule;
+    if (!schedule || schedule.status !== "ok") return;
+    scheduleList.push(...createCalendarScheduleSlidesHtml(schedule));
 }
 
 /**
@@ -890,7 +976,7 @@ function loadEarthquakeDataThenUpdate() {
     document.body.appendChild(earthquakeScript);
 }
 
-function fetchNewData() {
+function loadSignageDataThenUpdate() {
     const oldScript = document.getElementById("data-script");
     if (oldScript) oldScript.remove();
 
@@ -905,6 +991,21 @@ function fetchNewData() {
     };
 
     document.body.appendChild(script);
+}
+
+function fetchNewData() {
+    const oldStatusScript = document.getElementById("news-status-script");
+    if (oldStatusScript) oldStatusScript.remove();
+
+    const statusScript = document.createElement("script");
+    statusScript.id = "news-status-script";
+    statusScript.src = `temp/news_status.js?v=${Date.now()}`;
+    statusScript.onload = () => loadSignageDataThenUpdate();
+    statusScript.onerror = () => {
+        window.signageFetchStatus = undefined;
+        loadSignageDataThenUpdate();
+    };
+    document.body.appendChild(statusScript);
 }
 
 

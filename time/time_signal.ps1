@@ -21,6 +21,27 @@ $legacyNetworkJsonlPath = $networkSqlitePaths.LegacyJsonlPath
 $sqliteExePath = $networkSqlitePaths.SqliteExePath
 $networkSummaryPath = Join-Path $runtimeDbDir "network_status_summary.json"
 $networkHistoryErrorMessage = ""
+$timeSignalTriggerGraceSeconds = 20
+
+function Write-TimeSignalLog {
+    param(
+        [string]$Message,
+        [ValidateSet("INFO", "WARN", "ERROR")]
+        [string]$Level = "INFO"
+    )
+
+    try {
+        if (-not (Test-Path -LiteralPath $tempDir -PathType Container)) {
+            New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
+        }
+        $logPath = Join-Path $tempDir ("time_signal_{0}.log" -f (Get-Date -Format "yyyyMMdd"))
+        $line = "{0} [{1}] {2}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"), $Level, $Message
+        Add-Content -LiteralPath $logPath -Value $line -Encoding UTF8
+    }
+    catch {
+        Write-Host "時報ログの書き込みに失敗しました: $($_.Exception.Message)"
+    }
+}
 
 
 Add-Type -TypeDefinition @"
@@ -502,9 +523,13 @@ function Invoke-TimeSignalControlRequest {
 }
 
 function Process-TimeSignalControlRequests {
+    param([int]$MaxRequests = 8)
+
     if (-not $script:timeSignalControlListener) { return }
 
-    while ($script:timeSignalControlListener.Pending()) {
+    $processedRequests = 0
+    while ($processedRequests -lt $MaxRequests -and $script:timeSignalControlListener.Pending()) {
+        $processedRequests++
         $client = $script:timeSignalControlListener.AcceptTcpClient()
         try {
             $client.ReceiveTimeout = 1000
@@ -550,7 +575,11 @@ function Test-EewPriorityActive {
         if ((Get-Date) -lt $until) { return $true }
     }
     catch {
-        return $true
+        # 書き込み直後の一時的な不完全状態はEEW優先として扱う。
+        $lockAgeSeconds = ((Get-Date) - (Get-Item -LiteralPath $eewPriorityPath).LastWriteTime).TotalSeconds
+        if ($lockAgeSeconds -lt 2) { return $true }
+
+        Write-TimeSignalLog -Level "WARN" -Message "不正なEEW優先ロックを削除しました: $($_.Exception.Message)"
     }
 
     Remove-Item -LiteralPath $eewPriorityPath -Force -ErrorAction SilentlyContinue
@@ -565,57 +594,80 @@ function Play-Sound {
 
     if (Test-EewPriorityActive) {
         Write-Host "EEW優先中のため時報をスキップ"
+        Write-TimeSignalLog -Level "WARN" -Message "EEW優先中のため音源をスキップしました: $filePath"
         return $false
     }
     if (Test-TimeSignalPaused) {
         Write-Host "時報一時停止中のためスキップ"
+        Write-TimeSignalLog -Level "INFO" -Message "時報一時停止中のため音源をスキップしました: $filePath"
         return $false
     }
 
-    if (-not (Test-Path $filePath)) {
+    if (-not (Test-Path -LiteralPath $filePath -PathType Leaf)) {
         Write-Host "ファイルなし:$filePath"
+        Write-TimeSignalLog -Level "ERROR" -Message "音源ファイルがありません: $filePath"
         return $false
     }
 
     Write-Host "再生:$filePath"
+    $player = $null
 
-    $player = New-Object System.Windows.Media.MediaPlayer
-    $player.Open([Uri]$filePath)
-    $player.Volume = $timeSignalVolume
-    Start-Sleep -Milliseconds 200
-    $player.Play()
+    try {
+        $resolvedPath = (Resolve-Path -LiteralPath $filePath -ErrorAction Stop).Path
+        $player = New-Object System.Windows.Media.MediaPlayer
+        $player.Open([Uri]$resolvedPath)
+        $player.Volume = $timeSignalVolume
+        $loadStartedAt = Get-Date
+        $player.Play()
 
-    while (-not $player.NaturalDuration.HasTimeSpan) {
-        if (Test-EewPriorityActive -or (Test-TimeSignalPaused)) {
-            $player.Stop()
-            $player.Close()
-            return $false
+        while (-not $player.NaturalDuration.HasTimeSpan) {
+            if (Test-EewPriorityActive -or (Test-TimeSignalPaused)) {
+                return $false
+            }
+            if (((Get-Date) - $loadStartedAt).TotalSeconds -ge 5) {
+                throw "音源の読み込みが5秒以内に完了しませんでした。"
+            }
+            Start-Sleep -Milliseconds 50
         }
-        Start-Sleep -Milliseconds 50
-    }
 
-    $duration = [int]$player.NaturalDuration.TimeSpan.TotalMilliseconds
-    $elapsed = 0
-    while ($elapsed -lt $duration) {
-        if (Test-EewPriorityActive -or (Test-TimeSignalPaused)) {
-            Write-Host "EEW優先または時報一時停止のため時報再生を停止"
-            $player.Stop()
-            $player.Close()
-            return $false
+        $duration = [int]$player.NaturalDuration.TimeSpan.TotalMilliseconds
+        $playbackTimeoutAt = (Get-Date).AddMilliseconds($duration + 5000)
+
+        while ($player.Position.TotalMilliseconds -lt ($duration - 20)) {
+            if (Test-EewPriorityActive -or (Test-TimeSignalPaused)) {
+                Write-Host "EEW優先または時報一時停止のため時報再生を停止"
+                return $false
+            }
+            if ((Get-Date) -ge $playbackTimeoutAt) {
+                throw "音源の再生が規定時間内に完了しませんでした。"
+            }
+            # HTTP処理にかかった時間も再生時間へ含め、音源間に余分な待機を作らない。
+            Process-TimeSignalControlRequests -MaxRequests 1
+            $remaining = $duration - $player.Position.TotalMilliseconds
+            if ($remaining -le 0) { break }
+            $sleep = [Math]::Min(100, $remaining)
+            Start-Sleep -Milliseconds $sleep
         }
-        Process-TimeSignalControlRequests
-        $sleep = [Math]::Min(100, $duration - $elapsed)
-        Start-Sleep -Milliseconds $sleep
-        $elapsed += $sleep
-    }
 
-    $player.Close()
-    Start-Sleep -Milliseconds 100
-    return $true
+        Write-TimeSignalLog -Message "音源を再生しました: $resolvedPath"
+        return $true
+    }
+    catch {
+        Write-Host "音源再生エラー:$filePath $($_.Exception.Message)"
+        Write-TimeSignalLog -Level "ERROR" -Message "音源再生に失敗しました: $filePath / $($_.Exception.Message)"
+        return $false
+    }
+    finally {
+        if ($player) {
+            try { $player.Stop() } catch {}
+            try { $player.Close() } catch {}
+        }
+        Start-Sleep -Milliseconds 100
+    }
 }
 
-# 二重再生防止
-$lastPlayedMinute = -1
+# 同じ時報枠の二重再生を防止する。
+$lastHandledTimeSignalSlot = ""
 $announceTimeAtOtherTenMinutes = $false
 
 function Test-TimeSignalQuietHours {
@@ -632,26 +684,38 @@ function Test-TimeSignalControlDisabled {
     return $minutesFromMidnight -ge 0 -and $minutesFromMidnight -lt 355
 }
 function Start-Time-Signal {
-    $now = Get-Date
+    param([datetime]$Now = (Get-Date))
+
+    $now = $Now
     $hour = $now.Hour
     $minute = $now.Minute
     $second = $now.Second
     $intervalMinutes = Get-TimeSignalIntervalMinutes
 
-    if (Test-EewPriorityActive) { return }
-    if ($second -ne 0) { return }
     if ($minute % $intervalMinutes -ne 0) { return }
+    if ($second -gt $timeSignalTriggerGraceSeconds) { return }
+
+    $slotKey = $now.ToString("yyyyMMddHHmm")
+    if ($slotKey -eq $script:lastHandledTimeSignalSlot) { return }
+    $script:lastHandledTimeSignalSlot = $slotKey
+
     if (Test-TimeSignalQuietHours -Now $now) {
-        $script:lastPlayedMinute = -1
         Write-Host "夜間消音時間帯のため時報をスキップ"
+        Write-TimeSignalLog -Message "夜間消音時間帯のため時報をスキップしました: $($now.ToString('HH:mm:ss'))"
+        return
+    }
+    if (Test-EewPriorityActive) {
+        Write-TimeSignalLog -Level "WARN" -Message "EEW優先中のため時報をスキップしました: $($now.ToString('HH:mm:ss'))"
+        return
+    }
+    if (Test-TimeSignalPaused) {
+        Write-TimeSignalLog -Message "一時停止中のため時報をスキップしました: $($now.ToString('HH:mm:ss'))"
         return
     }
 
-    if ($minute -eq $lastPlayedMinute) { return }
-    $script:lastPlayedMinute = $minute
-
     Write-Host "===="
     Write-Host $now
+    Write-TimeSignalLog -Message "時報の再生を開始します: $($now.ToString('HH:mm:ss')) / ${intervalMinutes}分間隔"
 
     $hourPath = Join-Path $basePath "hour_24h"
     $minPath = Join-Path $basePath "minutes_24h"
@@ -725,8 +789,9 @@ function Start-Time-Signal {
 # メインループ（秒同期）
 Start-TimeSignalControlServer
 while ($true) {
-    Process-TimeSignalControlRequests
+    # HTTP制御に待たされても時報枠を逃さないよう、時報判定を先に行う。
     Start-Time-Signal
+    Process-TimeSignalControlRequests
 
     # 次の秒境界まで待つ
     $now = Get-Date

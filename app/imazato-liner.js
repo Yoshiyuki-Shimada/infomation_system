@@ -1,5 +1,9 @@
 const IMAZATO_LINER_MAX_AGE_MS = 120000;
 const IMAZATO_LINER_LOCAL_RELOAD_MS = 1000;
+const IMAZATO_LINER_STATUS_ICON_CHARACTERS = ["naaasuooo", "rimy", "tokumix"];
+const IMAZATO_LINER_STATUS_ICON_STORAGE_PREFIX =
+    "bus-status-icon-assignments:";
+const imazatoLinerStatusIconAssignmentCache = new Map();
 let imazatoLinerAutoDisplayOffDateKey = "";
 
 const imazatoLinerDestinationMaster = {
@@ -575,6 +579,167 @@ function formatImazatoLinerYmd(date) {
     return `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}${String(date.getDate()).padStart(2, "0")}`;
 }
 
+function formatImazatoLinerDateKey(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+}
+
+function getImazatoLinerStatusIconAssignments(dateKey) {
+    if (imazatoLinerStatusIconAssignmentCache.has(dateKey)) {
+        return imazatoLinerStatusIconAssignmentCache.get(dateKey);
+    }
+
+    const storageKey = IMAZATO_LINER_STATUS_ICON_STORAGE_PREFIX + dateKey;
+    let assignments = {};
+    try {
+        const saved = localStorage.getItem(storageKey);
+        if (saved) assignments = JSON.parse(saved);
+
+        for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+            const key = localStorage.key(index);
+            if (
+                key?.startsWith(IMAZATO_LINER_STATUS_ICON_STORAGE_PREFIX) &&
+                key !== storageKey
+            ) {
+                localStorage.removeItem(key);
+            }
+        }
+    } catch (error) {
+        console.warn("キャラクター割り当ての読込に失敗しました。", error);
+    }
+
+    imazatoLinerStatusIconAssignmentCache.set(dateKey, assignments);
+    return assignments;
+}
+
+function saveImazatoLinerStatusIconAssignments(dateKey, assignments) {
+    try {
+        localStorage.setItem(
+            IMAZATO_LINER_STATUS_ICON_STORAGE_PREFIX + dateKey,
+            JSON.stringify(assignments),
+        );
+    } catch (error) {
+        console.warn("キャラクター割り当ての保存に失敗しました。", error);
+    }
+}
+
+// 同じ運行日・同じ便では、状態が変わっても同じキャラクターを使う。
+function getImazatoLinerStatusIconCharacter(bus, now) {
+    const operationalDate = getImazatoLinerOperationalDate(now);
+    const dateKey = formatImazatoLinerDateKey(operationalDate);
+    const tripKey = [
+        bus.time,
+        bus.line,
+        bus.direction || bus.dir || "",
+        getImazatoLinerDestination(bus),
+    ].join("|");
+    const assignments = getImazatoLinerStatusIconAssignments(dateKey);
+
+    if (!IMAZATO_LINER_STATUS_ICON_CHARACTERS.includes(assignments[tripKey])) {
+        const randomIndex = Math.floor(
+            Math.random() * IMAZATO_LINER_STATUS_ICON_CHARACTERS.length,
+        );
+        assignments[tripKey] =
+            IMAZATO_LINER_STATUS_ICON_CHARACTERS[randomIndex];
+        saveImazatoLinerStatusIconAssignments(dateKey, assignments);
+    }
+
+    return assignments[tripKey];
+}
+
+function getImazatoLinerTravelStatus(secondsUntilDeparture) {
+    if (secondsUntilDeparture < 0 || secondsUntilDeparture > 1500) return null;
+    if (secondsUntilDeparture < 600) {
+        return { text: "諦めましょう", color: "#e02135", icon: "missed" };
+    }
+    if (secondsUntilDeparture < 720) {
+        return {
+            text: "走りましょう",
+            color: "#ee7b1a",
+            icon: "run",
+        };
+    }
+    if (secondsUntilDeparture < 780) {
+        return {
+            text: "早歩きしましょう",
+            color: "#ffe766",
+            icon: "fast",
+        };
+    }
+    if (secondsUntilDeparture < 900) {
+        return {
+            text: "歩いても間に合う",
+            color: "#019a66",
+            icon: "walk_green",
+        };
+    }
+    return {
+        text: "歩いても間に合う",
+        color: "#38d5ff",
+        icon: "walk_blue",
+    };
+}
+
+function getImazatoLinerCharacterPresentation(
+    bus,
+    now,
+    startDepartureStatus,
+    scheduledSeconds,
+) {
+    if (bus.suspensionFlg) {
+        return { src: "img/suspension.png", status: null, isStatusIcon: true };
+    }
+    if (getImazatoLinerTimetableFallbackStatus(bus)) return null;
+
+    const scheduledIconThresholdSeconds = 10 * 60;
+    const predictedTimeThresholdSeconds = 13 * 60;
+    const forecastTime = bus.predictedTime || bus.delayEstimateTime;
+    const predictedSeconds = forecastTime
+        ? getSecondsUntilImazatoLiner(forecastTime, now)
+        : null;
+    const hasMajorDelay =
+        Number(bus.delayMinutes) >= 3 ||
+        Number(bus.delayEstimateMinutes) >= 3;
+    const hasStartDepartureProblem = [
+        "始発発車未検知",
+        "発車情報未検出",
+        "始発発車遅れ見込み",
+    ].includes(startDepartureStatus?.text);
+    const showDelayIcon =
+        scheduledSeconds < scheduledIconThresholdSeconds &&
+        ((hasMajorDelay &&
+            predictedSeconds !== null &&
+            predictedSeconds < predictedTimeThresholdSeconds) ||
+            hasStartDepartureProblem);
+
+    if (showDelayIcon) {
+        return { src: "img/delay.png", status: null, isStatusIcon: true };
+    }
+    if (
+        scheduledSeconds < scheduledIconThresholdSeconds &&
+        hasMajorDelay &&
+        predictedSeconds !== null &&
+        predictedSeconds >= predictedTimeThresholdSeconds
+    ) {
+        return { src: "img/infomation.png", status: null, isStatusIcon: true };
+    }
+
+    // 残り時間表示と同じ時刻を使い、文字色とキャラクターの状態を一致させる。
+    const displayTime = getImazatoLinerDisplayBaseTime(bus, now);
+    const displaySeconds = getSecondsUntilImazatoLiner(displayTime, now);
+    const status = getImazatoLinerTravelStatus(displaySeconds);
+    if (!status) return null;
+
+    const character = getImazatoLinerStatusIconCharacter(bus, now);
+    return {
+        src: `img/status_icon/${character}/${character}_${status.icon}.png`,
+        status,
+        isStatusIcon: false,
+    };
+}
+
 function getImazatoLinerOperationalDate(now) {
     const operationalDate = new Date(now.getTime());
     if (now.getHours() < 4) {
@@ -636,6 +801,141 @@ function addImazatoLinerMinutes(time, minutes) {
     return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
+const IMAZATO_LINER_REMOVAL_GRACE_MS = 5000;
+const IMAZATO_LINER_REMOVAL_THRESHOLD_SECONDS = 480;
+const IMAZATO_LINER_UNDETECTED_ESTIMATED_SORT_THRESHOLD_SECONDS = 480;
+const imazatoLinerRemovalLifecycleByList = new Map();
+
+function getImazatoLinerScheduledTravelSeconds(bus) {
+    const startMinutes = getImazatoLinerMinutesOfDay(bus.startDepartureTime);
+    const stopMinutes = getImazatoLinerMinutesOfDay(bus.time);
+    if (startMinutes === null || stopMinutes === null) return null;
+
+    const durationMinutes = (stopMinutes - startMinutes + 1440) % 1440;
+    return durationMinutes * 60;
+}
+
+function getImazatoLinerSortSeconds(bus, now) {
+    const forecastTime = bus.predictedTime || bus.delayEstimateTime;
+    if (forecastTime) {
+        return getSecondsUntilImazatoLiner(forecastTime, now);
+    }
+
+    const scheduledSeconds = getSecondsUntilImazatoLiner(bus.time, now);
+    const shouldUseEstimatedArrival =
+        isImazatoLinerStartDepartureUndetected(bus, now) &&
+        scheduledSeconds <
+            IMAZATO_LINER_UNDETECTED_ESTIMATED_SORT_THRESHOLD_SECONDS;
+
+    if (shouldUseEstimatedArrival) {
+        const travelSeconds = getImazatoLinerScheduledTravelSeconds(bus);
+        if (travelSeconds !== null) return travelSeconds;
+    }
+
+    return scheduledSeconds;
+}
+
+function shouldGrayOutImazatoLinerRow(
+    bus,
+    startDepartureStatus,
+    scheduledSeconds,
+) {
+    if (bus.suspensionFlg) return true;
+    if (startDepartureStatus?.text !== "発車情報未検出") return false;
+
+    return (
+        scheduledSeconds <
+        IMAZATO_LINER_UNDETECTED_ESTIMATED_SORT_THRESHOLD_SECONDS
+    );
+}
+
+function getImazatoLinerRemovalKey(bus) {
+    return [
+        bus.time,
+        String(bus.line || "").toUpperCase(),
+        bus.direction || bus.dir || "",
+        getImazatoLinerDestination(bus),
+    ].join("|");
+}
+
+function getImazatoLinerRemovalLifecycle(listId, now) {
+    const serviceDateKey = formatImazatoLinerYmd(
+        getImazatoLinerOperationalDate(now),
+    );
+    const current = imazatoLinerRemovalLifecycleByList.get(listId);
+    if (current?.serviceDateKey === serviceDateKey) return current;
+
+    const lifecycle = {
+        serviceDateKey,
+        records: new Map(),
+    };
+    imazatoLinerRemovalLifecycleByList.set(listId, lifecycle);
+    return lifecycle;
+}
+
+function getImazatoLinerBusesWithRemovalGrace(listId, buses, now) {
+    const lifecycle = getImazatoLinerRemovalLifecycle(listId, now);
+    const currentKeys = new Set();
+    const nowMs = now.getTime();
+
+    buses.forEach((bus) => {
+        const key = getImazatoLinerRemovalKey(bus);
+        currentKeys.add(key);
+        const existing = lifecycle.records.get(key);
+        const removalSeconds = getImazatoLinerRemovalSeconds(bus, now);
+
+        if (removalSeconds >= IMAZATO_LINER_REMOVAL_THRESHOLD_SECONDS) {
+            lifecycle.records.set(key, {
+                bus,
+                blankUntil: 0,
+                hasBeenRendered: existing?.hasBeenRendered === true,
+            });
+            return;
+        }
+
+        if (existing?.hasBeenRendered) {
+            lifecycle.records.set(key, {
+                ...existing,
+                bus,
+                blankUntil:
+                    existing.blankUntil ||
+                    nowMs + IMAZATO_LINER_REMOVAL_GRACE_MS,
+            });
+        } else {
+            lifecycle.records.delete(key);
+        }
+    });
+
+    lifecycle.records.forEach((record, key) => {
+        if (!currentKeys.has(key)) {
+            if (!record.hasBeenRendered) {
+                lifecycle.records.delete(key);
+                return;
+            }
+            record.blankUntil =
+                record.blankUntil ||
+                nowMs + IMAZATO_LINER_REMOVAL_GRACE_MS;
+        }
+        if (record.blankUntil > 0 && record.blankUntil <= nowMs) {
+            lifecycle.records.delete(key);
+        }
+    });
+
+    return [...lifecycle.records.values()].map((record) => ({
+        ...record.bus,
+        removalBlank: record.blankUntil > nowMs,
+    }));
+}
+
+function markImazatoLinerRowsRendered(listId, buses, now) {
+    const lifecycle = getImazatoLinerRemovalLifecycle(listId, now);
+    buses.forEach((bus) => {
+        if (bus.removalBlank) return;
+        const record = lifecycle.records.get(getImazatoLinerRemovalKey(bus));
+        if (record) record.hasBeenRendered = true;
+    });
+}
+
 function getImazatoLinerDisplayBaseTime(bus, now = new Date()) {
     if (isImazatoLinerStartDepartureUndetected(bus, now)) {
         return bus.predictedTime || bus.delayEstimateTime || bus.time;
@@ -667,10 +967,10 @@ function getImazatoLinerTimetableFallbackStatus(bus) {
 }
 
 function getImazatoLinerRemainingColor(secondsUntilDeparture) {
-    if (secondsUntilDeparture <= 600) return "#e02135";
-    if (secondsUntilDeparture <= 720) return "#ee7b1a";
-    if (secondsUntilDeparture <= 780) return "#ffe766";
-    if (secondsUntilDeparture <= 900) return "#019a66";
+    if (secondsUntilDeparture < 600) return "#e02135";
+    if (secondsUntilDeparture < 720) return "#ee7b1a";
+    if (secondsUntilDeparture < 780) return "#ffe766";
+    if (secondsUntilDeparture < 900) return "#019a66";
     if (secondsUntilDeparture <= 1500) return "#38d5ff";
     return "#fff";
 }
@@ -760,9 +1060,13 @@ function getImazatoLinerRowStatuses(bus, now = new Date()) {
         operation: operationStatus,
         progress:
             bus.suspensionFlg || hideDelayedProgress ? null : progressInfo,
-        grayOut:
-            bus.suspensionFlg ||
-            startDepartureStatus?.text === "発車情報未検出",
+        grayOut: shouldGrayOutImazatoLinerRow(
+            bus,
+            startDepartureStatus,
+            scheduledSeconds,
+        ),
+        startDepartureStatus,
+        scheduledSeconds,
     };
 }
 function createImazatoLinerRow(bus, now = new Date()) {
@@ -777,6 +1081,18 @@ function createImazatoLinerRow(bus, now = new Date()) {
         destinationInfo.destinationKana,
     ];
     const destinationGuide = destinationGuides[guideMode];
+    const characterPresentation = getImazatoLinerCharacterPresentation(
+        bus,
+        now,
+        statuses.startDepartureStatus,
+        statuses.scheduledSeconds,
+    );
+    const characterStatusHtml = characterPresentation?.status
+        ? `<div class="char-status" style="color: ${characterPresentation.status.color};">${characterPresentation.status.text}</div>`
+        : "";
+    const characterHtml = characterPresentation
+        ? `<div class="char-container liner-char-container"><img src="${characterPresentation.src}" class="char-icon${characterPresentation.isStatusIcon ? " char-icon-status" : ""}">${characterStatusHtml}</div>`
+        : '<div class="char-container liner-char-container"></div>';
 
     return `
         <div class="bus-row liner-schedule-row${statuses.grayOut ? " bus-row-grayed" : ""}">
@@ -792,6 +1108,7 @@ function createImazatoLinerRow(bus, now = new Date()) {
                     <span class="liner-destination-en">${destinationGuide}</span>
                 </div>
             </div>
+            ${characterHtml}
         </div>
     `;
 }
@@ -809,28 +1126,33 @@ function isImazatoLinerPagingTarget(bus, now) {
 }
 
 function getImazatoLinerPagingWindow(activeBuses, now) {
-    const pagingTargets = activeBuses.filter((bus) =>
-        isImazatoLinerPagingTarget(bus, now),
+    const lastTargetIndex = activeBuses.reduce(
+        (lastIndex, bus, index) =>
+            isImazatoLinerPagingTarget(bus, now) ? index : lastIndex,
+        -1,
     );
-    if (pagingTargets.length < 3) return activeBuses.slice(0, 3);
+    if (lastTargetIndex < 3) return activeBuses.slice(0, 3);
 
-    return pagingTargets;
+    // 表示順の途中に30分超の便があっても、その後ろに対象便があれば一緒にページングする。
+    return activeBuses.slice(0, lastTargetIndex + 1);
 }
 
 function renderImazatoLinerList(elementId, buses, now) {
     const element = document.getElementById(elementId);
     if (!element) return [];
 
-    const activeBuses = [...buses]
+    const lifecycleBuses = getImazatoLinerBusesWithRemovalGrace(
+        elementId,
+        buses,
+        now,
+    );
+    const activeBuses = [...lifecycleBuses]
         .sort((a, b) => {
-            const aTime = getImazatoLinerDisplayBaseTime(a, now);
-            const bTime = getImazatoLinerDisplayBaseTime(b, now);
             return (
-                getSecondsUntilImazatoLiner(aTime, now) -
-                getSecondsUntilImazatoLiner(bTime, now)
+                getImazatoLinerSortSeconds(a, now) -
+                getImazatoLinerSortSeconds(b, now)
             );
-        })
-        .filter((bus) => getImazatoLinerRemovalSeconds(bus, now) >= 480);
+        });
     const pagingWindow = getImazatoLinerPagingWindow(activeBuses, now);
     const pageSize = 3;
     const totalPages = Math.max(1, Math.ceil(pagingWindow.length / pageSize));
@@ -844,8 +1166,12 @@ function renderImazatoLinerList(elementId, buses, now) {
     const displayedBuses = [];
 
     for (const bus of pageBuses) {
-        const secondsUntilRemoval = getImazatoLinerRemovalSeconds(bus, now);
-        if (secondsUntilRemoval < 480) continue;
+        if (bus.removalBlank) {
+            displayedRows.push(
+                '<div class="bus-row liner-schedule-row blank-bus-row"></div>',
+            );
+            continue;
+        }
 
         displayedRows.push(createImazatoLinerRow(bus, now));
 
@@ -856,6 +1182,7 @@ function renderImazatoLinerList(elementId, buses, now) {
         ? displayedRows.join("")
         : createImazatoLinerServiceFinishedHtml();
 
+    markImazatoLinerRowsRendered(elementId, pageBuses, now);
     return displayedBuses;
 }
 function getImazatoLinerGuideData(stopKey, bus) {

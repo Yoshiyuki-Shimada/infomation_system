@@ -5,6 +5,8 @@
 $parentDir = Split-Path -Path $PSScriptRoot -Parent
 $tempDir = Join-Path -Path $parentDir -ChildPath "temp"
 $filePath = Join-Path -Path $tempDir -ChildPath "news_data.js"
+$statusFilePath = Join-Path -Path $tempDir -ChildPath "news_status.js"
+. (Join-Path $PSScriptRoot "google_calendar.ps1")
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
@@ -55,6 +57,52 @@ function Get-YahooRailwayColor {
     return "yellow"
 }
 
+function ConvertTo-SignageComparisonJson {
+    param([object]$SignageData)
+
+    # 取得時刻など、表示内容ではない値を除外して比較する。
+    $copy = $SignageData | ConvertTo-Json -Depth 12 | ConvertFrom-Json
+    $copy.PSObject.Properties.Remove("updateTime")
+
+    if ($null -ne $copy.calendarSchedule) {
+        $copy.calendarSchedule.PSObject.Properties.Remove("updateTime")
+    }
+
+    if ($copy.weather -and $null -ne $copy.weather.generationtime_ms) {
+        $copy.weather.generationtime_ms = 0
+    }
+
+    if ($copy.weather -and $copy.weather.current_weather) {
+        # 現在天気の取得時刻・固定間隔は画面に表示しないため、差分対象外とする。
+        $copy.weather.current_weather.PSObject.Properties.Remove("time")
+        $copy.weather.current_weather.PSObject.Properties.Remove("interval")
+    }
+
+    if ($copy.weeklyWeather) {
+        # 週間予報の発表時刻は画面に表示せず、予報内容だけを比較する。
+        $copy.weeklyWeather.PSObject.Properties.Remove("reportDatetime")
+    }
+
+    return $copy | ConvertTo-Json -Depth 12 -Compress
+}
+
+function Write-NewsFetchStatus {
+    param(
+        [string]$Path,
+        [datetime]$FetchedAt
+    )
+
+    $status = [ordered]@{
+        updateTime = $FetchedAt.ToString("yyyy/MM/dd HH:mm")
+    }
+    $statusJson = $status | ConvertTo-Json -Compress
+    [IO.File]::WriteAllText(
+        $Path,
+        "var signageFetchStatus = $statusJson;",
+        [Text.UTF8Encoding]::new($false)
+    )
+}
+
 
 while ($true) {
     $data = @{
@@ -67,9 +115,13 @@ while ($true) {
         evacuation        = @();
         weeklyWeather     = $null;
         weatherWarnings   = $null;
+        calendarSchedule  = New-UnavailableCalendarSchedule;
         updateTime        = "";
     }
     Write-Host "$(Get-Date -Format 'HH:mm:ss') [Snow Link Drone] 情報更新開始..." -ForegroundColor Cyan
+
+    # 予定内容は保存せず、表示に必要な時間帯・件数・市区町村だけを集計する。
+    $data.calendarSchedule = Get-GoogleCalendarSchedule
 
     # --- 1. 気象情報 (Open-Meteo) ---
     try {
@@ -984,7 +1036,8 @@ while ($true) {
                                 name     = $yName; 
                                 body     = $yMsg; 
                                 color    = $yCol; 
-                                lineCode = 1; 
+                                lineCode = 1;
+                                lineId   = [string]$id;
                             }
                             Write-Host "  -> [Yahoo!] $yName ($yCol)" -ForegroundColor Green
                         }
@@ -1150,12 +1203,8 @@ while ($true) {
     if (Test-Path $filePath) {
         try {
             $rawContent = Get-Content $filePath -Raw
-            if ($rawContent -match 'var signageData = (\{.*\});') {
+            if ($rawContent -match '(?s)var\s+signageData\s*=\s*(\{.*\});\s*$') {
                 $oldData = $Matches[1] | ConvertFrom-Json
-
-                if ($oldData.weather -and $null -ne $oldData.weather.generationtime_ms) {
-                    $oldData.weather.generationtime_ms = 0
-                }
             }
         }
         catch {
@@ -1164,8 +1213,8 @@ while ($true) {
     }
 
     if ($oldData -ne $null) {
-        $currentCompareJson = $data | Select-Object * -ExcludeProperty updateTime | ConvertTo-Json -Depth 10 -Compress
-        $oldCompareJson = $oldData | Select-Object * -ExcludeProperty updateTime | ConvertTo-Json -Depth 10 -Compress
+        $currentCompareJson = ConvertTo-SignageComparisonJson -SignageData $data
+        $oldCompareJson = ConvertTo-SignageComparisonJson -SignageData $oldData
 
         if ($currentCompareJson -eq $oldCompareJson) {
             $hasChanged = $false
@@ -1173,12 +1222,13 @@ while ($true) {
         }
     }
 
-    $data.updateTime = (Get-Date -Format "yyyy/MM/dd HH:mm")
+    $fetchedAt = Get-Date
     if ($hasChanged) {
+        $data.updateTime = $fetchedAt.ToString("yyyy/MM/dd HH:mm")
         Write-Host " [System] 新しいデータを検知しました。" -ForegroundColor Cyan
     }
     else {
-        Write-Host " [System] 取得データに変更なし。更新時刻のみ更新します。" -ForegroundColor DarkGray
+        Write-Host " [System] 取得データに変更なし。news_data.js は更新しません。" -ForegroundColor DarkGray
     }
 
     if (-not (Test-Path $tempDir)) {
@@ -1186,10 +1236,18 @@ while ($true) {
         Write-Host " [System] temp フォルダを自動作成しました。" -ForegroundColor Yellow
     }
 
-    $json = $data | ConvertTo-Json -Depth 10
-    "var signageData = $json;" | Out-File -FilePath $filePath -Encoding utf8 -Force
+    Write-NewsFetchStatus -Path $statusFilePath -FetchedAt $fetchedAt
 
-    Write-Host "$(Get-Date -Format 'HH:mm:ss') news_data.js を更新しました。($filePath)" -ForegroundColor Cyan
+    if ($hasChanged) {
+        $json = $data | ConvertTo-Json -Depth 10
+        [IO.File]::WriteAllText(
+            $filePath,
+            "var signageData = $json;",
+            [Text.UTF8Encoding]::new($false)
+        )
+        Write-Host "$(Get-Date -Format 'HH:mm:ss') news_data.js を更新しました。($filePath)" -ForegroundColor Cyan
+    }
+
     # 5分ごとの情報取得
     Start-Sleep -Seconds 300
 }

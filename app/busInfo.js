@@ -15,6 +15,10 @@ const busDeveloperState = {
     commandBufferTimer: null,
     remoteCommandId: "",
 };
+const BUS_REMOVAL_GRACE_MS = 5000;
+const BUS_REMOVAL_THRESHOLD_SECONDS = 180;
+const BUS_UNDETECTED_ESTIMATED_SORT_THRESHOLD_SECONDS = 180;
+const busRemovalLifecycleByList = new Map();
 
 const transferGuideMessages = {
     "35_北": "地下鉄千日前線・今里筋線は、「地下鉄今里」で。地下鉄中央線は、「地下鉄緑橋」で。JR学研都市線・おおさか東線は、「鴫野駅前」で。地下鉄長堀鶴見緑地線は、「地下鉄蒲生四丁目」で。京阪線は、「地下鉄関目成育」で。地下鉄谷町線は、「高殿」でお乗り換えください。",
@@ -258,8 +262,57 @@ function calculateRemovalDiff(bus, now, baseDate) {
     return calculateDiff(removalTime || bus.time, now, baseDate);
 }
 
-function getBusSortTime(bus) {
-    return getBusDelayBaseTime(bus) || bus.time;
+function getBusScheduledTravelSeconds(bus, now, baseDate) {
+    if (!bus.startDepartureTime) return null;
+
+    const startSeconds = calculateDiff(
+        bus.startDepartureTime,
+        now,
+        baseDate,
+    ).pure_seconds;
+    const stopSeconds = calculateDiff(bus.time, now, baseDate).pure_seconds;
+    const durationSeconds = stopSeconds - startSeconds;
+    return durationSeconds >= 0
+        ? durationSeconds
+        : durationSeconds + 24 * 60 * 60;
+}
+
+function getBusSortSeconds(bus, now, baseDate) {
+    const delayBaseTime = getBusDelayBaseTime(bus);
+    if (delayBaseTime) {
+        return calculateDiff(delayBaseTime, now, baseDate).pure_seconds;
+    }
+
+    const scheduledSeconds = calculateDiff(
+        bus.time,
+        now,
+        baseDate,
+    ).pure_seconds;
+    const shouldUseEstimatedArrival =
+        isStartDepartureUndetected(bus, now, baseDate) &&
+        scheduledSeconds < BUS_UNDETECTED_ESTIMATED_SORT_THRESHOLD_SECONDS;
+
+    if (shouldUseEstimatedArrival) {
+        const travelSeconds = getBusScheduledTravelSeconds(bus, now, baseDate);
+        if (travelSeconds !== null) return travelSeconds;
+    }
+
+    return scheduledSeconds;
+}
+
+function shouldGrayOutBusRow(bus, startDepartureStatus, now, baseDate) {
+    if (bus.suspensionFlg) return true;
+    if (startDepartureStatus?.text !== "発車情報未検出") return false;
+
+    const scheduledSeconds = calculateDiff(
+        bus.time,
+        now,
+        baseDate,
+    ).pure_seconds;
+    return (
+        scheduledSeconds <
+        BUS_UNDETECTED_ESTIMATED_SORT_THRESHOLD_SECONDS
+    );
 }
 
 function hasMajorDelayForDisplay(bus, now, baseDate) {
@@ -271,8 +324,8 @@ function hasMajorDelayForDisplay(bus, now, baseDate) {
 }
 function sortBusesByDisplayTime(buses, now, baseDate) {
     return [...buses].sort((a, b) => {
-        const diffA = calculateDiff(getBusSortTime(a), now, baseDate).pure_seconds;
-        const diffB = calculateDiff(getBusSortTime(b), now, baseDate).pure_seconds;
+        const diffA = getBusSortSeconds(a, now, baseDate);
+        const diffB = getBusSortSeconds(b, now, baseDate);
         if (diffA !== diffB) return diffA - diffB;
 
         const aDelayed = hasMajorDelayForDisplay(a, now, baseDate);
@@ -280,6 +333,88 @@ function sortBusesByDisplayTime(buses, now, baseDate) {
         if (aDelayed !== bDelayed) return aDelayed ? 1 : -1;
 
         return a.time.localeCompare(b.time);
+    });
+}
+
+function getBusRemovalLifecycleKey(bus) {
+    return [
+        bus.time,
+        String(bus.line || "").toUpperCase(),
+        bus.dir || "",
+        getBusDestination(bus),
+    ].join("|");
+}
+
+function getBusRemovalLifecycle(listId, serviceDateKey) {
+    const current = busRemovalLifecycleByList.get(listId);
+    if (current?.serviceDateKey === serviceDateKey) return current;
+
+    const lifecycle = {
+        serviceDateKey,
+        records: new Map(),
+    };
+    busRemovalLifecycleByList.set(listId, lifecycle);
+    return lifecycle;
+}
+
+function getBusesWithRemovalGrace(listId, buses, now, baseDate) {
+    const lifecycle = getBusRemovalLifecycle(listId, formatDateKey(baseDate));
+    const currentKeys = new Set();
+    const nowMs = now.getTime();
+
+    buses.forEach((bus) => {
+        const key = getBusRemovalLifecycleKey(bus);
+        currentKeys.add(key);
+        const existing = lifecycle.records.get(key);
+        const removalSeconds = calculateRemovalDiff(bus, now, baseDate).pure_seconds;
+
+        if (removalSeconds >= BUS_REMOVAL_THRESHOLD_SECONDS) {
+            lifecycle.records.set(key, {
+                bus,
+                blankUntil: 0,
+                hasBeenRendered: existing?.hasBeenRendered === true,
+            });
+            return;
+        }
+
+        if (existing?.hasBeenRendered) {
+            lifecycle.records.set(key, {
+                ...existing,
+                bus,
+                blankUntil:
+                    existing.blankUntil || nowMs + BUS_REMOVAL_GRACE_MS,
+            });
+        } else {
+            lifecycle.records.delete(key);
+        }
+    });
+
+    lifecycle.records.forEach((record, key) => {
+        if (!currentKeys.has(key)) {
+            if (!record.hasBeenRendered) {
+                lifecycle.records.delete(key);
+                return;
+            }
+            record.blankUntil =
+                record.blankUntil || nowMs + BUS_REMOVAL_GRACE_MS;
+        }
+        if (record.blankUntil > 0 && record.blankUntil <= nowMs) {
+            lifecycle.records.delete(key);
+        }
+    });
+
+    return [...lifecycle.records.values()].map((record) => ({
+        ...record.bus,
+        removalBlank: record.blankUntil > nowMs,
+    }));
+}
+
+function markBusRowsRendered(listId, buses, baseDate) {
+    const lifecycle = getBusRemovalLifecycle(listId, formatDateKey(baseDate));
+    buses.forEach((bus) => {
+        if (bus.removalBlank) return;
+        const record = lifecycle.records.get(getBusRemovalLifecycleKey(bus));
+        if (record) record.hasBeenRendered = true;
     });
 }
 
@@ -452,20 +587,24 @@ function isBusPagingTarget(bus, now, opDate) {
 }
 
 function getBusPagingWindow(activeUpcoming, now, opDate, maxDisplay) {
-    const pagingTargets = activeUpcoming.filter((bus) =>
-        isBusPagingTarget(bus, now, opDate),
+    const lastTargetIndex = activeUpcoming.reduce(
+        (lastIndex, bus, index) =>
+            isBusPagingTarget(bus, now, opDate) ? index : lastIndex,
+        -1,
     );
-
-    if (pagingTargets.length < maxDisplay) {
+    if (lastTargetIndex < maxDisplay) {
         return activeUpcoming.slice(0, maxDisplay);
     }
 
-    return pagingTargets;
+    // 表示順の途中に20分超の便があっても、その後ろに対象便があれば一緒にページングする。
+    return activeUpcoming.slice(0, lastTargetIndex + 1);
 }
 
 function getTransferGuidePagingBuses(buses, now, opDate, maxDisplay) {
     const activeUpcoming = sortBusesByDisplayTime(buses, now, opDate).filter(
-        (bus) => calculateRemovalDiff(bus, now, opDate).pure_seconds >= 175,
+        (bus) =>
+            calculateRemovalDiff(bus, now, opDate).pure_seconds >=
+            BUS_REMOVAL_THRESHOLD_SECONDS,
     );
     const pagingWindow = getBusPagingWindow(
         activeUpcoming,
@@ -560,6 +699,50 @@ function getBusTravelIconPath(bus, opDate, statusName) {
 
     const character = getBusStatusIconCharacter(bus, opDate);
     return "status_icon/" + character + "/" + character + "_" + statusName + ".png";
+}
+
+function getBusDelayIconName(
+    bus,
+    startDepartureStatus,
+    scheduledSeconds,
+    now,
+    opDate,
+) {
+    const scheduledIconThresholdSeconds = 4 * 60 + 30;
+    const predictedTimeThresholdSeconds = 9 * 60;
+    const delayBaseTime = getBusDelayBaseTime(bus);
+    const predictedSeconds = delayBaseTime
+        ? calculateDiff(delayBaseTime, now, opDate).pure_seconds
+        : null;
+    const hasMajorDelay = Number(bus.delayMinutes) >= 5;
+    const hasStartDepartureProblem = [
+        "始発発車未検知",
+        "発車情報未検出",
+        "始発発車遅れ見込み",
+    ].includes(startDepartureStatus?.text);
+    const isNearScheduledDeparture =
+        scheduledSeconds <= scheduledIconThresholdSeconds;
+
+    if (
+        isNearScheduledDeparture &&
+        ((hasMajorDelay &&
+            predictedSeconds !== null &&
+            predictedSeconds < predictedTimeThresholdSeconds) ||
+            hasStartDepartureProblem)
+    ) {
+        return "delay.png";
+    }
+
+    if (
+        isNearScheduledDeparture &&
+        hasMajorDelay &&
+        predictedSeconds !== null &&
+        predictedSeconds >= predictedTimeThresholdSeconds
+    ) {
+        return "infomation.png";
+    }
+
+    return "";
 }
 
 function normalizeBusDeveloperTime(value) {
@@ -836,9 +1019,13 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
     if (!el) return [];
     const pageEl = document.getElementById(id.replace("list-", "page-"));
 
-    const allUpcoming = sortBusesByDisplayTime(buses, now, opDate).filter(
-        (bus) => calculateRemovalDiff(bus, now, opDate).pure_seconds >= 175,
-    ); // 5分以上遅延時は予測時刻、それ以外は定刻の3分前に表示を切り替える
+    const lifecycleBuses = getBusesWithRemovalGrace(
+        id,
+        buses,
+        now,
+        opDate,
+    );
+    const allUpcoming = sortBusesByDisplayTime(lifecycleBuses, now, opDate);
 
     const activeUpcoming = allUpcoming;
 
@@ -883,11 +1070,7 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
 
     el.innerHTML = displayBuses
         .map((bus) => {
-            const diffInfo = calculateRemovalDiff(bus, now, opDate);
-            const pureSeconds = diffInfo.pure_seconds;
-
-            // 2分55秒〜2分59秒の間は、このバスの行だけ空欄にする
-            if (pureSeconds >= 175 && pureSeconds < 180) {
+            if (bus.removalBlank) {
                 return `
                     <div class="bus-row blank-bus-row"></div>
                 `;
@@ -928,7 +1111,11 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
                 opDate,
             );
             const hasMajorDelay = hasMajorDelayForDisplay(bus, now, opDate);
-            const predictedSeconds = pureSeconds;
+            const predictedSeconds = calculateRemovalDiff(
+                bus,
+                now,
+                opDate,
+            ).pure_seconds;
             const delayStatusInfo = bus.suspensionFlg
                 ? null
                 : startDepartureStatus ||
@@ -1009,12 +1196,17 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
             progressInfo = showSoon
                 ? { text: "まもなく", color: "#ee7b1a" }
                 : remainingInfo;
+            const delayIconName = getBusDelayIconName(
+                bus,
+                startDepartureStatus,
+                diff_sec_pure,
+                now,
+                opDate,
+            );
             if (bus.suspensionFlg) {
                 imgName = "suspension.png";
-            } else if (showSoon) {
-                imgName = "delay.png";
-            } else if (delayOnly) {
-                imgName = "infomation.png";
+            } else if (delayIconName) {
+                imgName = delayIconName;
             } else if (isWithinDetailWindow) {
                 if (diff_sec_pure <= 270 && !hasMajorDelay) {
                     imgName = getBusTravelIconPath(bus, opDate, "missed");
@@ -1059,9 +1251,12 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
                 ? `<div class="char-container"><img src="img/${imgName}" class="${charIconClass}">${charStatusHtml}</div>`
                 : '<div class="char-container"></div>';
             const lineNumberStyle = getLineNumberStyle(bus.line);
-            const shouldGrayOutRow =
-                bus.suspensionFlg ||
-                startDepartureStatus?.text === "発車情報未検出";
+            const shouldGrayOutRow = shouldGrayOutBusRow(
+                bus,
+                startDepartureStatus,
+                now,
+                opDate,
+            );
 
             return `
                 <div class="bus-row${shouldGrayOutRow ? " bus-row-grayed" : ""}">
@@ -1084,7 +1279,8 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
         })
         .join("");
 
-    return displayBuses;
+    markBusRowsRendered(id, displayBuses, opDate);
+    return displayBuses.filter((bus) => !bus.removalBlank);
 }
 
 function getTransferGuideMessage(bus) {
@@ -1211,10 +1407,10 @@ function getTravelStatus(diff, diff_sec_pure, suppressGiveUp) {
             : { text: "諦めましょう", color: "#e02135" };
     }
     if (diff <= 7) {
-        return { text: "走ったら間に合う", color: "#ee7b1a" };
+        return { text: "走りましょう", color: "#ee7b1a" };
     }
     if (diff <= 8) {
-        return { text: "早歩きで間に合う", color: "#ffe766" };
+        return { text: "早歩きしましょう", color: "#ffe766" };
     }
     return {
         text: "歩いても間に合う",

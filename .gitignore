@@ -6,4 +6,4 @@ _update/
 bin/update_config.json
 time/audio_backup_before_normalize_*/
 database/runtime/
-
+/calendar_api/

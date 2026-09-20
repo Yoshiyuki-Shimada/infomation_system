@@ -1,8 +1,27 @@
+function updateScheduleStatusIcon() {
+    const icon = document.getElementById("schedule-status-icon");
+    if (!icon) return;
+
+    const schedule = window.signageData?.calendarSchedule;
+    if (!schedule || schedule.status !== "ok") {
+        icon.hidden = true;
+        return;
+    }
+
+    icon.hidden = false;
+    icon.src = schedule.hasConflict
+        ? "img/schedule/schedule_warning.png"
+        : "img/schedule/schedule_ok.png";
+    icon.alt = schedule.hasConflict ? "予定の重複あり" : "予定の重複なし";
+}
+
 // 1秒ごとの時計/バス更新
 scheduleLoadPromise
     .then(() => {
         refresh();
+        updateScheduleStatusIcon();
         setInterval(refresh, 1000);
+        setInterval(updateScheduleStatusIcon, 1000);
     })
     .catch((error) => {
         console.error(error);

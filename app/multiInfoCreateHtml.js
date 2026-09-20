@@ -232,6 +232,94 @@ function createWeatherWarningSlidesHtml(warningData) {
         `;
     });
 }
+
+/** HTMLへ挿入する予定表示文字列をエスケープする。 */
+function escapeCalendarHtml(value) {
+    return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+}
+
+function getCalendarBusyText(slot, showMunicipality) {
+    const count = Number(slot?.count || 0);
+    if (count <= 0) return "";
+    if (count >= 2) return `予定あり（${count}件）`;
+    if (showMunicipality && slot.municipality) {
+        return `予定あり（${escapeCalendarHtml(slot.municipality)}）`;
+    }
+    return "予定あり";
+}
+
+/** 本日と明日から7日間の予定スライドを生成する。 */
+function createCalendarScheduleSlidesHtml(schedule) {
+    const days = Array.isArray(schedule?.days) ? schedule.days : [];
+    if (days.length === 0) return [];
+
+    const today = days[0];
+    const todayRows = (today.slots || [])
+        .map((slot) => {
+            const busyText = getCalendarBusyText(slot, true);
+            return `
+                <div class="calendar-today-row ${busyText ? "is-busy" : ""}">
+                    <div class="calendar-time-label">${escapeCalendarHtml(slot.label)}</div>
+                    <div class="calendar-busy-value">${busyText || "予定なし"}</div>
+                </div>
+            `;
+        })
+        .join("");
+    const slides = [`
+        <div class="slide calendar-schedule-slide">
+            <div class="slide-title">本日の予定</div>
+            <div class="slide-content calendar-today-list">${todayRows}</div>
+        </div>
+    `];
+
+    const futureDays = days.slice(1, 8);
+    for (let pageStart = 0; pageStart < futureDays.length; pageStart += 4) {
+        const pageDays = futureDays.slice(pageStart, pageStart + 4);
+        const labels = pageDays[0]?.slots?.map((slot) => slot.label) || [];
+        const headerCells = pageDays
+            .map(
+                (day) =>
+                    `<div class="calendar-week-date">${escapeCalendarHtml(day.label)}</div>`,
+            )
+            .join("");
+        const rows = labels
+            .map((label, slotIndex) => {
+                const dayCells = pageDays
+                    .map((day) => {
+                        const text = getCalendarBusyText(
+                            day.slots?.[slotIndex],
+                            false,
+                        );
+                        return `<div class="calendar-week-value ${text ? "is-busy" : ""}">${text || "予定なし"}</div>`;
+                    })
+                    .join("");
+                return `
+                    <div class="calendar-week-row" style="--calendar-day-count: ${pageDays.length}">
+                        <div class="calendar-week-time">${escapeCalendarHtml(label)}</div>
+                        ${dayCells}
+                    </div>
+                `;
+            })
+            .join("");
+        slides.push(`
+            <div class="slide calendar-schedule-slide">
+                <div class="slide-title">週間予定（明日から7日間）</div>
+                <div class="slide-content calendar-week-list">
+                    <div class="calendar-week-header" style="--calendar-day-count: ${pageDays.length}">
+                        <div></div>${headerCells}
+                    </div>
+                    ${rows}
+                </div>
+            </div>
+        `);
+    }
+    return slides;
+}
 /**
  * 運行情報の概要のHTMLを生成
  * @param {*} formattedSections 影響区間・
@@ -322,10 +410,22 @@ function createRailwayInfoBodyHtml(
     badgeText,
     fixedBottomHtml,
 ) {
+    const lineSymbolHtml = getLineSymbolHtml(
+        r.name,
+        r.msg,
+        r.lineCode || "",
+        r.lineId || "",
+    );
+    const railwaySlideTitleHtml = `
+        <div class="slide-title railway-slide-title">
+            <span>列車運行情報</span>
+            ${lineSymbolHtml ? `<span class="railway-title-symbols">${lineSymbolHtml}</span>` : ""}
+        </div>
+    `;
     const railwayHeaderHtml = `
         <div class="railway-badge" style="background:${badgeBg}; color:${badgeText};">
             <div class="line_name">
-                ${getLineSymbolHtml(r.name, r.msg, r.lineCode || "")}${r.name}
+                ${lineSymbolHtml}${r.name}
             </div>
         </div>
 
@@ -337,7 +437,7 @@ function createRailwayInfoBodyHtml(
     if (r.lineCode == TRAIN_COMPANY.JR_WEST) {
         return `
             <div class="slide">
-                <div class="slide-title">列車運行情報</div>
+                ${railwaySlideTitleHtml}
                 <div class="slide-content railway-fixed-layout">
                     <div class="railway-fixed-header">
                         ${railwayHeaderHtml}
@@ -359,7 +459,7 @@ function createRailwayInfoBodyHtml(
 
     return `
         <div class="slide">
-            <div class="slide-title">列車運行情報</div>
+            ${railwaySlideTitleHtml}
             <div class="slide-content auto-scroll-viewport">
                 <div class="auto-scroll-content railway-scroll-content">
                     ${railwayHeaderHtml}

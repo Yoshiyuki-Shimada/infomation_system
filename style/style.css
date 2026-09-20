@@ -293,6 +293,16 @@ html {
     font-weight: bold;
 }
 
+.liner-char-container {
+    flex: 0 0 120px;
+    margin-left: 6px;
+}
+
+.liner-schedule-row > .destination-info {
+    min-width: 0;
+    overflow: hidden;
+}
+
 /* 右側：時計パネル */
 .clock-panel {
     width: 50%; /*35%*/
@@ -408,6 +418,20 @@ html {
     gap: 12px;
 }
 
+.header-date-schedule {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+}
+
+.schedule-status-icon {
+    width: 38px;
+    height: 38px;
+    object-fit: contain;
+    flex: 0 0 auto;
+}
+
 .network-health-icon {
     width: 34px;
     height: 34px;
@@ -490,6 +514,36 @@ html {
     }
 }
 
+/* 鉄道路線アイコンは、表示場所にかかわらず角丸のバッジとして揃える。 */
+.jr-line-symbol {
+    display: inline-block;
+    width: auto;
+    height: 1em;
+    margin-right: 0.3em;
+    border-radius: 0.2em;
+    vertical-align: -0.15em;
+}
+
+.railway-slide-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.railway-title-symbols {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 6px;
+}
+
+.railway-title-symbols .jr-line-symbol {
+    height: 1.45em;
+    margin-right: 0;
+    border-radius: 0.18em;
+    vertical-align: middle;
+}
 /* 列車運行情報：詳細表示用のスタイル */
 .railway-badge {
     display: inline-block;

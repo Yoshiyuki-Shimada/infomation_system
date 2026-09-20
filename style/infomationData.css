@@ -1,3 +1,77 @@
+/** Google Calendar予定表示 */
+.calendar-today-list,
+.calendar-week-list {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    flex-direction: column;
+    line-height: 1.2;
+}
+
+.calendar-today-row {
+    display: grid;
+    grid-template-columns: 170px minmax(0, 1fr);
+    flex: 1;
+    align-items: center;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.22);
+}
+
+.calendar-time-label,
+.calendar-week-time {
+    color: var(--snow-gray-text);
+    font-weight: bold;
+}
+
+.calendar-busy-value,
+.calendar-week-value {
+    padding-left: 18px;
+    color: var(--snow-gray-text);
+}
+
+.calendar-today-row.is-busy .calendar-busy-value,
+.calendar-week-value.is-busy {
+    color: var(--snow-white);
+    font-weight: bold;
+}
+
+.calendar-week-header,
+.calendar-week-row {
+    display: grid;
+    grid-template-columns: 120px repeat(var(--calendar-day-count), minmax(0, 1fr));
+}
+
+.calendar-week-header {
+    background: var(--moon-navy);
+    border-bottom: 2px solid var(--sky-blue);
+}
+
+.calendar-week-date,
+.calendar-week-time,
+.calendar-week-value {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    padding: 8px 5px;
+    text-align: center;
+}
+
+.calendar-week-row {
+    flex: 1;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.22);
+}
+
+.calendar-week-date {
+    color: var(--sky-yellow);
+    font-size: 1.15rem;
+    font-weight: bold;
+}
+
+.calendar-week-value {
+    border-left: 1px solid rgba(255, 255, 255, 0.16);
+    font-size: 1.05rem;
+}
+
 /** 津波情報の表示 */
 .tsunami {
     font-size: 2rem;
