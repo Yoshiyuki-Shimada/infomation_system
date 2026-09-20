@@ -19,6 +19,13 @@ let lastDisplayLogAt = 0;
 
 /** 表示される情報を格納するリスト */
 let slideList = [];
+let slideCycleRanges = [];
+let activeSignageData = null;
+let activeSignageSignature = "";
+let pendingSignageData = null;
+let pendingSignageSignature = "";
+let pendingNonNewsApplied = false;
+let activeEarthquakeSignature = "";
 
 const container = document.getElementById("slide-container");
 const idleView = document.getElementById("idle-view");
@@ -241,6 +248,41 @@ function getUpdateSignature(value) {
     }
 }
 
+function getComparableSignageData(data) {
+    const comparable = JSON.parse(JSON.stringify(data || {}));
+    delete comparable.updateTime;
+
+    if (comparable.calendarSchedule) {
+        delete comparable.calendarSchedule.updateTime;
+    }
+    if (comparable.weather) {
+        comparable.weather.generationtime_ms = 0;
+        if (comparable.weather.current_weather) {
+            delete comparable.weather.current_weather.time;
+            delete comparable.weather.current_weather.interval;
+        }
+    }
+    if (comparable.weeklyWeather) {
+        delete comparable.weeklyWeather.reportDatetime;
+    }
+
+    return comparable;
+}
+
+function getSignageContentSignature(data) {
+    return getUpdateSignature(getComparableSignageData(data));
+}
+
+function getNonNewsSignature(data) {
+    const comparable = getComparableSignageData(data);
+    delete comparable.news;
+    return getUpdateSignature(comparable);
+}
+
+function getNewsSignature(data) {
+    return getUpdateSignature(getComparableSignageData(data).news || []);
+}
+
 function parseSignageDataUpdateTime(value) {
     const match = String(value || "").match(
         /^(\d{4})\/(\d{2})\/(\d{2}) (\d{2}):(\d{2})$/,
@@ -290,13 +332,18 @@ function updateSignage() {
 
     if (!hasCurrentSignageData && !activeEarthquakeData) {
         lastUpdateTime = "";
+        activeSignageData = null;
+        activeSignageSignature = "";
+        pendingSignageData = null;
+        pendingSignageSignature = "";
+        pendingNonNewsApplied = false;
         infoDataFailed();
         return;
     }
 
-    // 古いnews_dataは破棄し、別ファイルで受信した緊急情報だけを継続表示する。
-    if (!hasCurrentSignageData) {
-        window.signageData = {
+    const incomingData = hasCurrentSignageData
+        ? JSON.parse(JSON.stringify(signageData))
+        : {
             updateTime: "",
             tsunami: [],
             earthquake: null,
@@ -308,16 +355,56 @@ function updateSignage() {
             weeklyWeather: null,
             calendarSchedule: null,
         };
+    const incomingSignature = getSignageContentSignature(incomingData);
+    const earthquakeSignature = getUpdateSignature(activeEarthquakeData);
+
+    if (!activeSignageData) {
+        activeSignageData = incomingData;
+        activeSignageSignature = incomingSignature;
+        window.signageData = activeSignageData;
+        renderActiveSignage(0);
+        return;
     }
 
-    const signageUpdateSignature = getUpdateSignature(signageData);
-    const updateKey = `${signageUpdateSignature}|${activeEarthquakeData?.updateTime || ""}`;
-    if (updateKey === lastUpdateTime) return;
+    // 古いnews_dataは即時破棄し、別ファイルの緊急情報だけを表示する。
+    if (!hasCurrentSignageData) {
+        const requiresRender =
+            incomingSignature !== activeSignageSignature ||
+            earthquakeSignature !== activeEarthquakeSignature;
+        activeSignageData = incomingData;
+        activeSignageSignature = incomingSignature;
+        pendingSignageData = null;
+        pendingSignageSignature = "";
+        pendingNonNewsApplied = false;
+        window.signageData = activeSignageData;
+        if (requiresRender) renderActiveSignage(0);
+        return;
+    }
 
-    console.log("最終更新:" + lastUpdateTime);
-    console.log("取得ファイルの日時:" + updateKey);
+    if (incomingSignature === activeSignageSignature) {
+        pendingSignageData = null;
+        pendingSignageSignature = "";
+        pendingNonNewsApplied = false;
+    } else if (incomingSignature !== pendingSignageSignature) {
+        pendingSignageData = incomingData;
+        pendingSignageSignature = incomingSignature;
+        pendingNonNewsApplied = false;
+    }
 
-    lastUpdateTime = updateKey;
+    // 読み込んだ最新データはサイクル境界まで保留し、表示中データへ戻す。
+    window.signageData = activeSignageData;
+    if (earthquakeSignature !== activeEarthquakeSignature) {
+        const currentCycle = getSlideCycleRange(currentSlide)?.cycleIndex || 0;
+        renderActiveSignage(currentCycle);
+    }
+}
+
+function renderActiveSignage(startCycleIndex = 0) {
+    const activeEarthquakeData = getActiveEarthquakeData();
+    window.signageData = activeSignageData;
+    activeSignageSignature = getSignageContentSignature(activeSignageData);
+    activeEarthquakeSignature = getUpdateSignature(activeEarthquakeData);
+    lastUpdateTime = `${activeSignageSignature}|${activeEarthquakeSignature}`;
 
     emergencyList = [];
     evacuationList = [];
@@ -325,8 +412,6 @@ function updateSignage() {
     newsArticles = [];
     weatherList = [];
     scheduleList = [];
-
-    currentSlide = 0;
 
     console.log("データ読み取り実行");
 
@@ -339,34 +424,44 @@ function updateSignage() {
     importNewsData();
     importWeatherData();
 
-    slideList = [];
-
-    const importantInfo = [
-        ...emergencyList,
-        ...evacuationList,
-        ...railwayList,
-        ...scheduleList,
-    ];
+    const alertInfo = [...emergencyList, ...evacuationList];
+    const transitInfo = [...railwayList, ...scheduleList];
     const isDisasterPriority = activeEarthquakeData?.priorityMode === "disaster";
     const hasEarthquakeBottomBanner = activeEarthquakeData?.priorityMode === "bottom" || !!activeEarthquakeData?.emergencyMode?.active;
 
+    let cycles = [];
     if (isDisasterPriority) {
-        slideList.push(createDisasterPriorityHtml(activeEarthquakeData, signageData.railway || []));
+        cycles = [[
+            createDisasterPriorityHtml(
+                activeEarthquakeData,
+                signageData.railway || [],
+            ),
+        ]];
     } else {
-        slideList.push(...importantInfo);
-        slideList.push(...weatherList);
-
-        newsArticles.forEach((pages, index) => {
-            slideList.push(...pages);
-            slideList.push(...importantInfo);
-
-            if ((index + 1) % 3 === 0) {
-                slideList.push(...weatherList);
-            }
+        const newsCycles = newsArticles.length > 0 ? newsArticles : [[]];
+        cycles = newsCycles.map((newsPages, index) => {
+            return [
+                ...alertInfo,
+                ...(index % 3 === 0 ? weatherList : []),
+                ...transitInfo,
+                ...newsPages,
+            ].filter((slide) => slide !== "");
         });
     }
 
-    slideList = slideList.filter((s) => s !== "");
+    slideList = [];
+    slideCycleRanges = [];
+    cycles.forEach((cycleSlides, cycleIndex) => {
+        if (cycleSlides.length === 0) return;
+
+        const start = slideList.length;
+        slideList.push(...cycleSlides);
+        slideCycleRanges.push({
+            cycleIndex,
+            start,
+            end: slideList.length - 1,
+        });
+    });
 
     const bottomBannerHtml =
         !isDisasterPriority && hasEarthquakeBottomBanner
@@ -385,6 +480,15 @@ function updateSignage() {
         container.style.display = "block";
 
         if (slideList.length > 0) {
+            const cycleCount = slideCycleRanges.length;
+            const normalizedCycleIndex = cycleCount
+                ? ((startCycleIndex % cycleCount) + cycleCount) % cycleCount
+                : 0;
+            const startRange =
+                slideCycleRanges.find(
+                    (range) => range.cycleIndex === normalizedCycleIndex,
+                ) || slideCycleRanges[0];
+            currentSlide = startRange?.start || 0;
             showSlide();
         }
     } else {
@@ -861,6 +965,72 @@ function logDisplayedSlide(slide, slideIndex, slideCount) {
     });
 }
 
+function getSlideCycleRange(slideIndex) {
+    return slideCycleRanges.find(
+        (range) => slideIndex >= range.start && slideIndex <= range.end,
+    );
+}
+
+function applyPendingDataAtCycleEnd(completedRange) {
+    if (!pendingSignageData || !completedRange) return false;
+
+    const completedRangeIndex = slideCycleRanges.indexOf(completedRange);
+    const isFullRotation =
+        completedRangeIndex === slideCycleRanges.length - 1;
+    if (!isFullRotation && pendingNonNewsApplied) return false;
+
+    const hasNonNewsChanges =
+        getNonNewsSignature(pendingSignageData) !==
+        getNonNewsSignature(activeSignageData);
+    const hasNewsChanges =
+        getNewsSignature(pendingSignageData) !==
+        getNewsSignature(activeSignageData);
+
+    if (!isFullRotation && !hasNonNewsChanges) {
+        pendingNonNewsApplied = true;
+        return false;
+    }
+
+    if (isFullRotation && !hasNonNewsChanges && !hasNewsChanges) {
+        pendingSignageData = null;
+        pendingSignageSignature = "";
+        pendingNonNewsApplied = false;
+        return false;
+    }
+
+    const nextData = JSON.parse(JSON.stringify(pendingSignageData));
+    if (!isFullRotation) {
+        // ニュースは全ニュースサイクルを表示し終えるまで現在版を維持する。
+        nextData.news = JSON.parse(
+            JSON.stringify(activeSignageData?.news || []),
+        );
+    }
+
+    activeSignageData = nextData;
+    activeSignageSignature = getSignageContentSignature(activeSignageData);
+    if (isFullRotation) {
+        pendingSignageData = null;
+        pendingSignageSignature = "";
+        pendingNonNewsApplied = false;
+    } else {
+        pendingNonNewsApplied = true;
+    }
+
+    const nextRangeIndex =
+        (completedRangeIndex + 1) % slideCycleRanges.length;
+    const nextCycleIndex = slideCycleRanges[nextRangeIndex]?.cycleIndex || 0;
+    renderActiveSignage(nextCycleIndex);
+    return true;
+}
+
+function completeDisplayedSlide(slideIndex) {
+    const completedRange = getSlideCycleRange(slideIndex);
+    const isCycleEnd = completedRange?.end === slideIndex;
+    if (isCycleEnd && applyPendingDataAtCycleEnd(completedRange)) return;
+
+    showSlide();
+}
+
 function showSlide() {
     clearSlideTimer();
 
@@ -875,7 +1045,7 @@ function showSlide() {
 
     const nextSlideInterval = prepareAutoScroll(activeSlide);
     currentSlide = (currentSlide + 1) % slides.length;
-    scheduleNextSlide(nextSlideInterval);
+    scheduleNextSlide(nextSlideInterval, activeSlideIndex);
 }
 
 function clearSlideTimer() {
@@ -950,9 +1120,18 @@ function startEmergencyInfoLineRotation(root = document) {
         showCurrent();
     }, EMERGENCY_INFO_FRAME_INTERVAL_MS);
 }
-function scheduleNextSlide(intervalMs = DEFAULT_SLIDE_INTERVAL_MS) {
+function scheduleNextSlide(
+    intervalMs = DEFAULT_SLIDE_INTERVAL_MS,
+    completedSlideIndex = null,
+) {
     clearSlideTimer();
-    slideTimerId = setTimeout(showSlide, intervalMs);
+    slideTimerId = setTimeout(() => {
+        if (Number.isInteger(completedSlideIndex)) {
+            completeDisplayedSlide(completedSlideIndex);
+            return;
+        }
+        showSlide();
+    }, intervalMs);
 }
 
 function resetAutoScrollContent(content) {
