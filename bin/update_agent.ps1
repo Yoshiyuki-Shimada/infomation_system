@@ -261,6 +261,7 @@ function Get-EdgePath {
 
 function Stop-SignageProcesses {
     $scriptNames = @(
+        "start_news_fetcher.ps1",
         "fetch_news.ps1",
         "fetch_bus.ps1",
         "fetch_imazato_liner.ps1",

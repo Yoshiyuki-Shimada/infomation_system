@@ -476,7 +476,13 @@ function Save-NetworkSummary {
 }
 
 function Stop-OnlineDataFetchers {
-    foreach ($scriptName in @("fetch_news.ps1", "fetch_bus.ps1", "fetch_imazato_liner.ps1")) {
+    $scriptNames = @(
+        "start_news_fetcher.ps1",
+        "fetch_news.ps1",
+        "fetch_bus.ps1",
+        "fetch_imazato_liner.ps1"
+    )
+    foreach ($scriptName in $scriptNames) {
         Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" -ErrorAction SilentlyContinue |
             Where-Object { $_.CommandLine -like "*$scriptName*" } |
             ForEach-Object {
@@ -495,11 +501,18 @@ function Clear-OnlineTempData {
 function Start-OnlineDataFetchers {
     Stop-OnlineDataFetchers
 
-    foreach ($scriptName in @("fetch_news.ps1", "fetch_bus.ps1", "fetch_imazato_liner.ps1")) {
+    $newsLauncherPath = Join-Path $rootPath "bin\start_news_fetcher.ps1"
+    if (Test-Path -LiteralPath $newsLauncherPath -PathType Leaf) {
+        Start-Process powershell `
+            -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$newsLauncherPath`"" `
+            -WindowStyle Hidden
+    }
+
+    foreach ($scriptName in @("fetch_bus.ps1", "fetch_imazato_liner.ps1")) {
         $scriptPath = Join-Path $appPath $scriptName
         if (Test-Path -LiteralPath $scriptPath -PathType Leaf) {
             Start-Process powershell `
-                -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$scriptPath`"" `
+                -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$scriptPath`"" `
                 -WindowStyle Hidden
         }
     }

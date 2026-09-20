@@ -4,6 +4,7 @@ REM Edgeだけ閉じる
 taskkill /f /im msedge.exe >nul 2>&1
 
 REM ニュース自動取得プログラムおよび時報、インターネット接続監視プログラムの終了
+wmic process where "commandline like '%%start_news_fetcher.ps1%%'" call terminate
 wmic process where "commandline like '%%fetch_news.ps1%%'" call terminate
 wmic process where "commandline like '%%fetch_bus.ps1%%'" call terminate
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*fetch_bus.ps1*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"

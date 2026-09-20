@@ -6,6 +6,7 @@ for %%i in ("%~dp0..") do set "PARENT_DIR=%%~fi"
 
 powershell -ExecutionPolicy Bypass -File "%PARENT_DIR%\bin\display_power_control.ps1" -WakeOnce
 
+wmic process where "commandline like '%%start_news_fetcher.ps1%%'" call terminate
 wmic process where "commandline like '%%fetch_news.ps1%%'" call terminate
 wmic process where "commandline like '%%fetch_bus.ps1%%'" call terminate
 wmic process where "commandline like '%%fetch_imazato_liner.ps1%%'" call terminate
@@ -15,8 +16,8 @@ wmic process where "commandline like '%%display_power_control.ps1%%'" call termi
 wmic process where "commandline like '%%earthquake_monitor.ps1%%'" call terminate
 wmic process where "commandline like '%%play_eew_sequence.ps1%%'" call terminate
 
-rem Start news, weather, railway, and warning fetcher.
-start "" /min powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File "%PARENT_DIR%\app\fetch_news.ps1"
+rem Wait for the network and keep the news/weather/railway fetcher alive.
+start "" /min powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%PARENT_DIR%\bin\start_news_fetcher.ps1"
 
 rem Start Osaka City Bus online data fetcher.
 start "" /min powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File "%PARENT_DIR%\app\fetch_bus.ps1"
