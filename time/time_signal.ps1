@@ -23,6 +23,7 @@ $sqliteExePath = $networkSqlitePaths.SqliteExePath
 $networkSummaryPath = Join-Path $runtimeDbDir "network_status_summary.json"
 $networkHistoryErrorMessage = ""
 $timeSignalTriggerGraceSeconds = 20
+$newsFetcherLauncherPath = Join-Path $projectDir "bin\start_news_fetcher.ps1"
 
 function Write-TimeSignalLog {
     param(
@@ -110,6 +111,52 @@ function Get-JsonResponse {
     param([object]$Payload)
 
     return ($Payload | ConvertTo-Json -Depth 12 -Compress)
+}
+
+function Start-NewsFetcherIfNeeded {
+    $powershellProcesses = @(
+        Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" -ErrorAction SilentlyContinue
+    )
+    $launcherProcess = $powershellProcesses |
+        Where-Object {
+            ([string]$_.CommandLine).IndexOf(
+                "start_news_fetcher.ps1",
+                [StringComparison]::OrdinalIgnoreCase
+            ) -ge 0
+        } |
+        Select-Object -First 1
+    if ($launcherProcess) {
+        return @{ ok = $true; running = $true; started = $false }
+    }
+
+    if (-not (Test-Path -LiteralPath $newsFetcherLauncherPath -PathType Leaf)) {
+        return @{
+            ok      = $false
+            running = $false
+            started = $false
+            error   = "launcher not found"
+        }
+    }
+
+    # ランチャーを使わない旧プロセスは、同一ファイルへの二重書き込みを防ぐため停止する。
+    $powershellProcesses |
+        Where-Object {
+            $commandLine = [string]$_.CommandLine
+            $commandLine.IndexOf(
+                "fetch_news.ps1",
+                [StringComparison]::OrdinalIgnoreCase
+            ) -ge 0
+        } |
+        ForEach-Object {
+            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+
+    Start-Process `
+        -FilePath "powershell.exe" `
+        -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$newsFetcherLauncherPath`"" `
+        -WindowStyle Hidden
+    Write-TimeSignalLog -Message "情報画面からの要求でニュース取得ランチャーを起動しました。"
+    return @{ ok = $true; running = $true; started = $true }
 }
 
 function Write-InformationDisplayLog {
@@ -508,6 +555,10 @@ function Invoke-TimeSignalControlRequest {
             Write-TimeSignalLog -Level "WARN" -Message "表示情報ログの保存に失敗しました: $($_.Exception.Message)"
             return Get-JsonResponse -Payload @{ ok = $false; error = "log write failed" }
         }
+    }
+
+    if ($uri.AbsolutePath -eq "/time-signal/information/start-fetcher") {
+        return Get-JsonResponse -Payload (Start-NewsFetcherIfNeeded)
     }
 
 

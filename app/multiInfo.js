@@ -12,8 +12,11 @@ const EMERGENCY_RECENT_REPEAT_MS = 5 * 60 * 1000;
 const SIGNAGE_DATA_MAX_TIME_OFFSET_MS = 30 * 60 * 1000;
 const INFORMATION_DISPLAY_LOG_URL =
     "http://127.0.0.1:18765/time-signal/information/display-log";
+const INFORMATION_FETCHER_START_URL =
+    "http://127.0.0.1:18765/time-signal/information/start-fetcher";
 const DISPLAY_LOG_DUPLICATE_WINDOW_MS = 5000;
 const DATA_RELOAD_TIMEOUT_MS = 10000;
+const FETCHER_START_REQUEST_INTERVAL_MS = 10000;
 
 let lastDisplayLogKey = "";
 let lastDisplayLogAt = 0;
@@ -31,6 +34,7 @@ let hasRenderedActiveSignage = false;
 let dataReloadInProgress = false;
 let dataReloadStartedAt = 0;
 let dataReloadRequestId = 0;
+let lastFetcherStartRequestAt = 0;
 
 const container = document.getElementById("slide-container");
 const idleView = document.getElementById("idle-view");
@@ -934,6 +938,21 @@ function infoDataFailed() {
         container.classList.remove("with-earthquake-bottom-banner");
         container.innerHTML = "";
     }
+    requestInformationFetcherStart();
+}
+
+function requestInformationFetcherStart() {
+    const now = Date.now();
+    if (now - lastFetcherStartRequestAt < FETCHER_START_REQUEST_INTERVAL_MS) {
+        return;
+    }
+
+    lastFetcherStartRequestAt = now;
+    fetch(INFORMATION_FETCHER_START_URL, { cache: "no-store" }).catch(
+        (error) => {
+            console.warn("ニュース取得処理の開始要求に失敗しました。", error);
+        },
+    );
 }
 
 /**
