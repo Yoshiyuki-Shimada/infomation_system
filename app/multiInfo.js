@@ -14,6 +14,8 @@ const INFORMATION_DISPLAY_LOG_URL =
     "http://127.0.0.1:18765/time-signal/information/display-log";
 const INFORMATION_FETCHER_START_URL =
     "http://127.0.0.1:18765/time-signal/information/start-fetcher";
+const INFORMATION_CURRENT_DATA_URL =
+    "http://127.0.0.1:18765/time-signal/information/current";
 const DISPLAY_LOG_DUPLICATE_WINDOW_MS = 5000;
 const DATA_RELOAD_TIMEOUT_MS = 10000;
 const FETCHER_START_REQUEST_INTERVAL_MS = 10000;
@@ -1254,7 +1256,7 @@ function loadSignageDataThenUpdate(requestId) {
     document.body.appendChild(script);
 }
 
-function fetchNewData() {
+async function fetchNewData() {
     const now = Date.now();
     if (
         dataReloadInProgress &&
@@ -1266,18 +1268,28 @@ function fetchNewData() {
     dataReloadInProgress = true;
     dataReloadStartedAt = now;
     const requestId = ++dataReloadRequestId;
-    const oldStatusScript = document.getElementById("news-status-script");
-    if (oldStatusScript) oldStatusScript.remove();
 
-    const statusScript = document.createElement("script");
-    statusScript.id = "news-status-script";
-    statusScript.src = `temp/news_status.js?v=${Date.now()}`;
-    statusScript.onload = () => loadSignageDataThenUpdate(requestId);
-    statusScript.onerror = () => {
-        window.signageFetchStatus = undefined;
+    try {
+        const response = await fetch(INFORMATION_CURRENT_DATA_URL, {
+            cache: "no-store",
+        });
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        const payload = await response.json();
+        if (requestId !== dataReloadRequestId) return;
+        window.signageFetchStatus = payload.fetchStatus || undefined;
+        window.signageData = payload.signageData || undefined;
+        window.earthquakeData = payload.earthquakeData || undefined;
+        finishDataReloadAndUpdate(requestId);
+    } catch (error) {
+        console.warn(
+            "ローカルAPIから情報データを取得できないため、ファイル読込を再試行します。",
+            error,
+        );
         loadSignageDataThenUpdate(requestId);
-    };
-    document.body.appendChild(statusScript);
+    }
 }
 
 function updateSignageWithRetryLogging() {

@@ -113,6 +113,43 @@ function Get-JsonResponse {
     return ($Payload | ConvertTo-Json -Depth 12 -Compress)
 }
 
+function Read-JavaScriptJsonVariable {
+    param(
+        [string]$Path,
+        [string]$VariableName
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+
+    try {
+        $source = Get-Content -LiteralPath $Path -Raw -Encoding UTF8
+        $escapedName = [Regex]::Escape($VariableName)
+        $pattern = "(?s)^\s*(?:var|let|const)\s+$escapedName\s*=\s*(.+?)\s*;\s*$"
+        $match = [Regex]::Match($source, $pattern)
+        if (-not $match.Success) { return $null }
+        return $match.Groups[1].Value | ConvertFrom-Json
+    }
+    catch {
+        Write-TimeSignalLog -Level "WARN" -Message "情報データを読み込めませんでした ($VariableName): $($_.Exception.Message)"
+        return $null
+    }
+}
+
+function Get-CurrentInformationDataJson {
+    $payload = [ordered]@{
+        fetchStatus = Read-JavaScriptJsonVariable `
+            -Path (Join-Path $tempDir "news_status.js") `
+            -VariableName "signageFetchStatus"
+        signageData = Read-JavaScriptJsonVariable `
+            -Path (Join-Path $tempDir "news_data.js") `
+            -VariableName "signageData"
+        earthquakeData = Read-JavaScriptJsonVariable `
+            -Path (Join-Path $tempDir "earthquake_data.js") `
+            -VariableName "earthquakeData"
+    }
+    return ($payload | ConvertTo-Json -Depth 100 -Compress)
+}
+
 function Start-NewsFetcherIfNeeded {
     $powershellProcesses = @(
         Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" -ErrorAction SilentlyContinue
@@ -559,6 +596,10 @@ function Invoke-TimeSignalControlRequest {
 
     if ($uri.AbsolutePath -eq "/time-signal/information/start-fetcher") {
         return Get-JsonResponse -Payload (Start-NewsFetcherIfNeeded)
+    }
+
+    if ($uri.AbsolutePath -eq "/time-signal/information/current") {
+        return Get-CurrentInformationDataJson
     }
 
 
