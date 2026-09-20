@@ -317,14 +317,14 @@ function parseSignageDataUpdateTime(value) {
 function isSignageDataCurrent(data, now = new Date()) {
     const fetchStatus =
         typeof signageFetchStatus !== "undefined" ? signageFetchStatus : null;
-    const updateTime = parseSignageDataUpdateTime(
-        fetchStatus?.updateTime || data?.updateTime,
-    );
-    if (!updateTime) return false;
+    const updateTimes = [fetchStatus?.updateTime, data?.updateTime]
+        .map((value) => parseSignageDataUpdateTime(value))
+        .filter(Boolean);
 
-    return (
-        Math.abs(now.getTime() - updateTime.getTime()) <=
-        SIGNAGE_DATA_MAX_TIME_OFFSET_MS
+    return updateTimes.some(
+        (updateTime) =>
+            Math.abs(now.getTime() - updateTime.getTime()) <=
+            SIGNAGE_DATA_MAX_TIME_OFFSET_MS,
     );
 }
 
