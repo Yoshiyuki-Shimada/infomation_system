@@ -6,6 +6,7 @@ $parentDir = Split-Path -Path $PSScriptRoot -Parent
 $tempDir = Join-Path -Path $parentDir -ChildPath "temp"
 $filePath = Join-Path -Path $tempDir -ChildPath "news_data.js"
 $statusFilePath = Join-Path -Path $tempDir -ChildPath "news_status.js"
+$informationLogDir = Join-Path -Path $parentDir -ChildPath "logs\information"
 . (Join-Path $PSScriptRoot "google_calendar.ps1")
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -101,6 +102,38 @@ function Write-NewsFetchStatus {
         "var signageFetchStatus = $statusJson;",
         [Text.UTF8Encoding]::new($false)
     )
+}
+
+function Write-NewsFetchLog {
+    param(
+        [object]$SignageData,
+        [datetime]$FetchedAt,
+        [bool]$HasChanged
+    )
+
+    try {
+        if (-not (Test-Path -LiteralPath $informationLogDir -PathType Container)) {
+            New-Item -Path $informationLogDir -ItemType Directory -Force | Out-Null
+        }
+
+        $record = [ordered]@{
+            loggedAt = $FetchedAt.ToString("o")
+            source   = "fetch_news.ps1"
+            changed  = $HasChanged
+            data     = $SignageData
+        }
+        $json = $record | ConvertTo-Json -Depth 15 -Compress
+        $logPath = Join-Path $informationLogDir ("fetched_{0}.jsonl" -f $FetchedAt.ToString("yyyyMMdd"))
+        [IO.File]::AppendAllText(
+            $logPath,
+            $json + [Environment]::NewLine,
+            [Text.UTF8Encoding]::new($false)
+        )
+    }
+    catch {
+        # ログ障害によって情報取得処理自体を停止させない。
+        Write-Host " [System] 取得情報ログの保存に失敗しました: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
 }
 
 
@@ -1237,6 +1270,7 @@ while ($true) {
     }
 
     Write-NewsFetchStatus -Path $statusFilePath -FetchedAt $fetchedAt
+    Write-NewsFetchLog -SignageData $data -FetchedAt $fetchedAt -HasChanged $hasChanged
 
     if ($hasChanged) {
         $json = $data | ConvertTo-Json -Depth 10

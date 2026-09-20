@@ -308,7 +308,7 @@ function Backup-CurrentSystem {
     $backupDir = Join-Path -Path $backupRoot -ChildPath (Get-Date -Format "yyyyMMdd_HHmmss")
     Ensure-Directory $backupDir
 
-    $excludeRootNames = @(".git", "_update", "temp")
+    $excludeRootNames = @(".git", "_update", "temp", "logs")
     Get-ChildItem -LiteralPath $projectDir -Force |
         Where-Object { $excludeRootNames -notcontains $_.Name } |
         ForEach-Object {

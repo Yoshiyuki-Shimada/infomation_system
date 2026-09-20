@@ -92,6 +92,7 @@ $excludeRootNames = @(
     ".git",
     "_update",
     "temp",
+    "logs",
     "monitor_css",
     "document"
 )
@@ -164,6 +165,7 @@ $robocopyArgs = @(
     (Join-Path $projectDir ".git"),
     (Join-Path $projectDir "_update"),
     (Join-Path $projectDir "temp"),
+    (Join-Path $projectDir "logs"),
     (Join-Path $projectDir "monitor_css"),
     (Join-Path $projectDir "document"),
     (Join-Path $projectDir "database\runtime"),

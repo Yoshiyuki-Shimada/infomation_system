@@ -10,6 +10,12 @@ const SCROLL_START_DELAY_MS = 10000;
 const EMERGENCY_INFO_FRAME_INTERVAL_MS = 5000;
 const EMERGENCY_RECENT_REPEAT_MS = 5 * 60 * 1000;
 const SIGNAGE_DATA_MAX_TIME_OFFSET_MS = 30 * 60 * 1000;
+const INFORMATION_DISPLAY_LOG_URL =
+    "http://127.0.0.1:18765/time-signal/information/display-log";
+const DISPLAY_LOG_DUPLICATE_WINDOW_MS = 5000;
+
+let lastDisplayLogKey = "";
+let lastDisplayLogAt = 0;
 
 /** 表示される情報を格納するリスト */
 let slideList = [];
@@ -817,6 +823,44 @@ function infoDataFailed() {
  * 画面の反映
  * @returns データなしなら実行しない
  */
+function normalizeDisplayLogText(value) {
+    return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function logDisplayedSlide(slide, slideIndex, slideCount) {
+    const titleElement = slide.querySelector(
+        ".slide-title, .info-title, h1, h2, h3",
+    );
+    const payload = {
+        slideIndex: slideIndex + 1,
+        slideCount,
+        dataUpdateTime:
+            typeof signageData !== "undefined" ? signageData.updateTime || "" : "",
+        classes: Array.from(slide.classList).filter(
+            (className) => className !== "active",
+        ),
+        title: normalizeDisplayLogText(titleElement?.textContent),
+        text: normalizeDisplayLogText(slide.textContent),
+    };
+    const logKey = JSON.stringify(payload);
+    const now = Date.now();
+
+    // 同一スライドの再描画による連続した重複だけを抑止する。
+    if (
+        logKey === lastDisplayLogKey &&
+        now - lastDisplayLogAt < DISPLAY_LOG_DUPLICATE_WINDOW_MS
+    ) {
+        return;
+    }
+
+    lastDisplayLogKey = logKey;
+    lastDisplayLogAt = now;
+    const url = `${INFORMATION_DISPLAY_LOG_URL}?payload=${encodeURIComponent(logKey)}`;
+    fetch(url, { cache: "no-store" }).catch(() => {
+        // ログ障害はサイネージ表示を妨げない。
+    });
+}
+
 function showSlide() {
     clearSlideTimer();
 
@@ -824,8 +868,10 @@ function showSlide() {
     if (slides.length === 0) return;
     slides.forEach((s) => s.classList.remove("active"));
     currentSlide = currentSlide % slides.length;
-    const activeSlide = slides[currentSlide];
+    const activeSlideIndex = currentSlide;
+    const activeSlide = slides[activeSlideIndex];
     activeSlide.classList.add("active");
+    logDisplayedSlide(activeSlide, activeSlideIndex, slides.length);
 
     const nextSlideInterval = prepareAutoScroll(activeSlide);
     currentSlide = (currentSlide + 1) % slides.length;

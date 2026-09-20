@@ -5,6 +5,7 @@ Set-Location $PSScriptRoot
 $basePath = Join-Path $PSScriptRoot "audio"
 $projectDir = Split-Path -Path $PSScriptRoot -Parent
 $tempDir = Join-Path $projectDir "temp"
+$informationLogDir = Join-Path $projectDir "logs\information"
 $eewPriorityPath = Join-Path $projectDir "temp\eew_audio_priority.lock"
 $timeSignalPausePath = Join-Path $projectDir "temp\time_signal_pause_until.txt"
 $timeSignalIntervalPath = Join-Path $projectDir "temp\time_signal_interval_minutes.txt"
@@ -109,6 +110,28 @@ function Get-JsonResponse {
     param([object]$Payload)
 
     return ($Payload | ConvertTo-Json -Depth 12 -Compress)
+}
+
+function Write-InformationDisplayLog {
+    param([object]$DisplayData)
+
+    if (-not (Test-Path -LiteralPath $informationLogDir -PathType Container)) {
+        New-Item -Path $informationLogDir -ItemType Directory -Force | Out-Null
+    }
+
+    $now = Get-Date
+    $record = [ordered]@{
+        loggedAt = $now.ToString("o")
+        source   = "information-system"
+        display  = $DisplayData
+    }
+    $json = $record | ConvertTo-Json -Depth 12 -Compress
+    $logPath = Join-Path $informationLogDir ("displayed_{0}.jsonl" -f $now.ToString("yyyyMMdd"))
+    [IO.File]::AppendAllText(
+        $logPath,
+        $json + [Environment]::NewLine,
+        [Text.UTF8Encoding]::new($false)
+    )
 }
 
 
@@ -468,6 +491,23 @@ function Invoke-TimeSignalControlRequest {
 
     if ($uri.AbsolutePath -eq "/time-signal/network/status") {
         return Get-NetworkStatusJson -Uri $uri
+    }
+
+    if ($uri.AbsolutePath -eq "/time-signal/information/display-log") {
+        $payloadText = Get-QueryValue -Uri $uri -Name "payload"
+        if ([string]::IsNullOrWhiteSpace($payloadText) -or $payloadText.Length -gt 65536) {
+            return Get-JsonResponse -Payload @{ ok = $false; error = "invalid payload" }
+        }
+
+        try {
+            $displayData = $payloadText | ConvertFrom-Json
+            Write-InformationDisplayLog -DisplayData $displayData
+            return Get-JsonResponse -Payload @{ ok = $true }
+        }
+        catch {
+            Write-TimeSignalLog -Level "WARN" -Message "表示情報ログの保存に失敗しました: $($_.Exception.Message)"
+            return Get-JsonResponse -Payload @{ ok = $false; error = "log write failed" }
+        }
     }
 
 
