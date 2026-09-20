@@ -1,5 +1,6 @@
 /** 表示させる情報の番号 */
 let currentSlide = 0;
+let currentVisibleSlideIndex = -1;
 
 let slideTimerId = null;
 let emergencyInfoTimerId = null;
@@ -26,6 +27,9 @@ let lastDisplayLogAt = 0;
 /** 表示される情報を格納するリスト */
 let slideList = [];
 let slideCycleRanges = [];
+let displayedRailwayRouteKeysInCycle = new Set();
+let activeRailwayTrackingCycleIndex = null;
+let immediateRailwaySignature = "";
 let activeSignageData = null;
 let activeSignageSignature = "";
 let pendingSignageData = null;
@@ -50,6 +54,23 @@ const TRAIN_COMPANY = {
     JR_WEST: 0,
     OTHERS: 1,
 };
+
+function getRailwayRouteKey(item) {
+    return [item?.lineCode, item?.lineId, item?.company, item?.name]
+        .map((value) => String(value ?? "").trim())
+        .join("|");
+}
+
+function getRailwayRouteKeyFromSlide(slide) {
+    const encodedKey = slide?.dataset?.railwayRouteKey;
+    if (!encodedKey) return "";
+
+    try {
+        return decodeURIComponent(encodedKey);
+    } catch {
+        return encodedKey;
+    }
+}
 
 /** Yahoo!運行情報の路線IDと私鉄路線アイコンの対応表 */
 const PRIVATE_RAILWAY_SYMBOLS = {
@@ -403,6 +424,13 @@ function updateSignage() {
         pendingNonNewsApplied = false;
     }
 
+    const railwayChanged =
+        getUpdateSignature(incomingData.railway || []) !==
+        getUpdateSignature(activeSignageData.railway || []);
+    if (hasRenderedActiveSignage && railwayChanged) {
+        replaceUnshownRailwaySlides(incomingData);
+    }
+
     // 読み込んだ最新データはサイクル境界まで保留し、表示中データへ戻す。
     window.signageData = activeSignageData;
     if (!hasRenderedActiveSignage) {
@@ -424,6 +452,10 @@ function updateSignage() {
 
 function renderActiveSignage(startCycleIndex = 0) {
     hasRenderedActiveSignage = false;
+    currentVisibleSlideIndex = -1;
+    displayedRailwayRouteKeysInCycle = new Set();
+    activeRailwayTrackingCycleIndex = null;
+    immediateRailwaySignature = "";
     const activeEarthquakeData = getActiveEarthquakeData();
     window.signageData = activeSignageData;
     activeSignageSignature = getSignageContentSignature(activeSignageData);
@@ -614,9 +646,12 @@ function importCalendarScheduleData() {
 /**
  * 列車の運行情報の取得
  */
-function importRailwayInfoData() {
-    if (signageData.railway?.length > 0) {
-        signageData.railway.forEach((r) => {
+function importRailwayInfoData(
+    railwayItems = signageData.railway,
+    targetList = railwayList,
+) {
+    if (railwayItems?.length > 0) {
+        railwayItems.forEach((r) => {
             // デフォルトカラー（遅延・一部運休など）
             let badgeBg = "var(--sky-yellow)";
             let badgeText = "#000";
@@ -689,7 +724,7 @@ function importRailwayInfoData() {
                 }
             }
 
-            railwayList.push(
+            targetList.push(
                 createRailwayInfoBodyHtml(
                     r,
                     r.body || "",
@@ -700,6 +735,12 @@ function importRailwayInfoData() {
             );
         });
     }
+}
+
+function createRailwaySlides(railwayItems) {
+    const slides = [];
+    importRailwayInfoData(railwayItems, slides);
+    return slides;
 }
 
 /**
@@ -933,6 +974,10 @@ function importWeatherData() {
 /* インフォデータの取得失敗時 */
 function infoDataFailed() {
     hasRenderedActiveSignage = false;
+    currentVisibleSlideIndex = -1;
+    displayedRailwayRouteKeysInCycle = new Set();
+    activeRailwayTrackingCycleIndex = null;
+    immediateRailwaySignature = "";
     activeSignageData = null;
     activeSignageSignature = "";
     pendingSignageData = null;
@@ -1017,6 +1062,104 @@ function getSlideCycleRange(slideIndex) {
     );
 }
 
+function replaceUnshownRailwaySlides(incomingData) {
+    const incomingRailway = incomingData?.railway || [];
+    const incomingSignature = getUpdateSignature(incomingRailway);
+    if (incomingSignature === immediateRailwaySignature) return;
+    immediateRailwaySignature = incomingSignature;
+
+    const range = getSlideCycleRange(currentVisibleSlideIndex);
+    if (!range || currentSlide > range.end) return;
+
+    const container = document.getElementById("slide-container");
+    if (!container) return;
+
+    const slideElements = Array.from(container.children).filter((element) =>
+        element.classList.contains("slide"),
+    );
+    const remainingRailwayIndices = [];
+    for (
+        let index = Math.max(currentSlide, range.start);
+        index <= range.end;
+        index++
+    ) {
+        if (slideElements[index]?.dataset?.slideType === "railway") {
+            remainingRailwayIndices.push(index);
+        }
+    }
+    if (remainingRailwayIndices.length === 0) return;
+
+    const replaceStart = remainingRailwayIndices[0];
+    const replaceEnd =
+        remainingRailwayIndices[remainingRailwayIndices.length - 1];
+    const oldRemainingByRoute = new Map();
+    remainingRailwayIndices.forEach((index) => {
+        const routeKey = getRailwayRouteKeyFromSlide(slideElements[index]);
+        if (!oldRemainingByRoute.has(routeKey)) {
+            oldRemainingByRoute.set(routeKey, []);
+        }
+        oldRemainingByRoute.get(routeKey).push(slideList[index]);
+    });
+
+    const incomingRouteOrder = [];
+    const incomingByRoute = new Map();
+    incomingRailway.forEach((item) => {
+        const routeKey = getRailwayRouteKey(item);
+        if (!incomingByRoute.has(routeKey)) {
+            incomingRouteOrder.push(routeKey);
+            incomingByRoute.set(routeKey, []);
+        }
+        incomingByRoute.get(routeKey).push(...createRailwaySlides([item]));
+    });
+
+    const replacementSlides = [];
+    incomingRouteOrder.forEach((routeKey) => {
+        if (displayedRailwayRouteKeysInCycle.has(routeKey)) {
+            replacementSlides.push(...(oldRemainingByRoute.get(routeKey) || []));
+            oldRemainingByRoute.delete(routeKey);
+            return;
+        }
+        replacementSlides.push(...(incomingByRoute.get(routeKey) || []));
+        oldRemainingByRoute.delete(routeKey);
+    });
+
+    // 更新後に消えた路線でも、すでに表示済みなら同じサイクル中は旧情報を保持する。
+    oldRemainingByRoute.forEach((slides, routeKey) => {
+        if (displayedRailwayRouteKeysInCycle.has(routeKey)) {
+            replacementSlides.push(...slides);
+        }
+    });
+
+    const removedCount = replaceEnd - replaceStart + 1;
+    const nextElement = slideElements[replaceEnd]?.nextSibling || null;
+    for (let index = replaceStart; index <= replaceEnd; index++) {
+        slideElements[index]?.remove();
+    }
+
+    replacementSlides.forEach((html) => {
+        const template = document.createElement("template");
+        template.innerHTML = html.trim();
+        const slide = template.content.firstElementChild;
+        if (slide) container.insertBefore(slide, nextElement);
+    });
+    slideList.splice(replaceStart, removedCount, ...replacementSlides);
+
+    const delta = replacementSlides.length - removedCount;
+    slideCycleRanges.forEach((cycleRange) => {
+        if (cycleRange === range) {
+            cycleRange.end += delta;
+            return;
+        }
+        if (cycleRange.start > range.end - delta) {
+            cycleRange.start += delta;
+            cycleRange.end += delta;
+        }
+    });
+    if (currentSlide >= replaceStart) {
+        currentSlide = replaceStart;
+    }
+}
+
 function applyPendingDataAtCycleEnd(completedRange) {
     if (!pendingSignageData || !completedRange) return false;
 
@@ -1086,6 +1229,17 @@ function showSlide() {
     currentSlide = currentSlide % slides.length;
     const activeSlideIndex = currentSlide;
     const activeSlide = slides[activeSlideIndex];
+    const activeRange = getSlideCycleRange(activeSlideIndex);
+    if (activeRange?.cycleIndex !== activeRailwayTrackingCycleIndex) {
+        activeRailwayTrackingCycleIndex = activeRange?.cycleIndex ?? null;
+        displayedRailwayRouteKeysInCycle = new Set();
+        immediateRailwaySignature = "";
+    }
+    currentVisibleSlideIndex = activeSlideIndex;
+    const railwayRouteKey = getRailwayRouteKeyFromSlide(activeSlide);
+    if (railwayRouteKey) {
+        displayedRailwayRouteKeysInCycle.add(railwayRouteKey);
+    }
     activeSlide.classList.add("active");
     logDisplayedSlide(activeSlide, activeSlideIndex, slides.length);
 

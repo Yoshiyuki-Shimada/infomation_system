@@ -410,6 +410,7 @@ function createRailwayInfoBodyHtml(
     badgeText,
     fixedBottomHtml,
 ) {
+    const railwayRouteKey = encodeURIComponent(getRailwayRouteKey(r));
     const lineSymbolHtml = getLineSymbolHtml(
         r.name,
         r.msg,
@@ -436,7 +437,7 @@ function createRailwayInfoBodyHtml(
 
     if (r.lineCode == TRAIN_COMPANY.JR_WEST) {
         return `
-            <div class="slide">
+            <div class="slide" data-slide-type="railway" data-railway-route-key="${railwayRouteKey}">
                 ${railwaySlideTitleHtml}
                 <div class="slide-content railway-fixed-layout">
                     <div class="railway-fixed-header">
@@ -458,7 +459,7 @@ function createRailwayInfoBodyHtml(
     }
 
     return `
-        <div class="slide">
+        <div class="slide" data-slide-type="railway" data-railway-route-key="${railwayRouteKey}">
             ${railwaySlideTitleHtml}
             <div class="slide-content auto-scroll-viewport">
                 <div class="auto-scroll-content railway-scroll-content">
