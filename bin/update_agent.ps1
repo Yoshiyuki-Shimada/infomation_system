@@ -14,6 +14,8 @@ $packageDir = Join-Path -Path $updateRoot -ChildPath "packages"
 $stagingRoot = Join-Path -Path $updateRoot -ChildPath "staging"
 $backupRoot = Join-Path -Path $updateRoot -ChildPath "backup"
 $logDir = Join-Path -Path $updateRoot -ChildPath "logs"
+$informationLogDir = Join-Path -Path $projectDir -ChildPath "logs\information"
+$informationLogExportName = "information_logs"
 $configPath = Join-Path -Path $PSScriptRoot -ChildPath "update_config.json"
 $defaultWatchPath = "C:\infomation_system_updates\inbox"
 $mutex = [Threading.Mutex]::new($false, "Global\InfomationSystemUpdateAgent")
@@ -79,6 +81,42 @@ function Write-UpdateStatus {
         [Text.UTF8Encoding]::new($false)
     )
     Write-UpdateLog "$Message $Detail"
+}
+
+function Export-InformationLogs {
+    if (-not (Test-Path -LiteralPath $informationLogDir -PathType Container)) {
+        return
+    }
+
+    try {
+        $exportDir = Join-Path -Path $WatchPath -ChildPath $informationLogExportName
+        Ensure-Directory $exportDir
+
+        Get-ChildItem -LiteralPath $informationLogDir -Filter "*.jsonl" -File |
+            ForEach-Object {
+                $sourceFile = $_
+                $destinationPath = Join-Path $exportDir $sourceFile.Name
+                $destinationFile = Get-Item -LiteralPath $destinationPath -ErrorAction SilentlyContinue
+                $isCurrent =
+                    $destinationFile -and
+                    $destinationFile.Length -eq $sourceFile.Length -and
+                    $destinationFile.LastWriteTimeUtc -ge $sourceFile.LastWriteTimeUtc
+                if (-not $isCurrent) {
+                    $temporaryPath = "$destinationPath.part"
+                    Copy-Item -LiteralPath $sourceFile.FullName -Destination $temporaryPath -Force
+                    if (Test-Path -LiteralPath $destinationPath -PathType Leaf) {
+                        [IO.File]::Replace($temporaryPath, $destinationPath, $null)
+                    }
+                    else {
+                        Move-Item -LiteralPath $temporaryPath -Destination $destinationPath
+                    }
+                }
+            }
+    }
+    catch {
+        # ログ公開の失敗によって更新監視を停止させない。
+        Write-UpdateLog "情報表示ログの公開に失敗しました: $($_.Exception.Message)"
+    }
 }
 
 function Read-Config {
@@ -450,6 +488,8 @@ try {
     }
 
     while ($true) {
+        Export-InformationLogs
+
         $requests = Get-ChildItem -LiteralPath $WatchPath -Filter "*.ready.json" -File -ErrorAction SilentlyContinue |
             Sort-Object LastWriteTime
 
