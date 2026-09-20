@@ -1,4 +1,4 @@
-param(
+﻿param(
     [int]$NetworkRetrySeconds = 5,
     [int]$ProcessRetrySeconds = 10
 )
