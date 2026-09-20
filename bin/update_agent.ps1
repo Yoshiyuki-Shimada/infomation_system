@@ -91,10 +91,16 @@ function Export-InformationLogs {
     try {
         $exportDir = Join-Path -Path $WatchPath -ChildPath $informationLogExportName
         Ensure-Directory $exportDir
+    }
+    catch {
+        Write-UpdateLog "情報表示ログの公開先を準備できませんでした: $($_.Exception.Message)"
+        return
+    }
 
-        Get-ChildItem -LiteralPath $informationLogDir -Filter "*.jsonl" -File |
-            ForEach-Object {
-                $sourceFile = $_
+    Get-ChildItem -LiteralPath $informationLogDir -Filter "*.jsonl" -File |
+        ForEach-Object {
+            $sourceFile = $_
+            try {
                 $destinationPath = Join-Path $exportDir $sourceFile.Name
                 $destinationFile = Get-Item -LiteralPath $destinationPath -ErrorAction SilentlyContinue
                 $isCurrent =
@@ -102,20 +108,14 @@ function Export-InformationLogs {
                     $destinationFile.Length -eq $sourceFile.Length -and
                     $destinationFile.LastWriteTimeUtc -ge $sourceFile.LastWriteTimeUtc
                 if (-not $isCurrent) {
-                    $temporaryPath = "$destinationPath.part"
-                    Copy-Item -LiteralPath $sourceFile.FullName -Destination $temporaryPath -Force
-                    if (Test-Path -LiteralPath $destinationPath -PathType Leaf) {
-                        [IO.File]::Replace($temporaryPath, $destinationPath, $null)
-                    }
-                    else {
-                        Move-Item -LiteralPath $temporaryPath -Destination $destinationPath
-                    }
+                    # SMB共有では File.Replace が失敗する場合があるため通常の上書きコピーを使う。
+                    Copy-Item -LiteralPath $sourceFile.FullName -Destination $destinationPath -Force
                 }
             }
-    }
-    catch {
-        # ログ公開の失敗によって更新監視を停止させない。
-        Write-UpdateLog "情報表示ログの公開に失敗しました: $($_.Exception.Message)"
+            catch {
+                # 1件の失敗で、以降の取得・表示ログの公開を止めない。
+                Write-UpdateLog "情報表示ログの公開に失敗しました ($($sourceFile.Name)): $($_.Exception.Message)"
+            }
     }
 }
 
