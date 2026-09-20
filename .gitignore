@@ -8,3 +8,5 @@ time/audio_backup_before_normalize_*/
 database/runtime/
 /logs/
 /calendar_api/
+/time/audio/hour_24h/random_30/
+/img/status_icon/
