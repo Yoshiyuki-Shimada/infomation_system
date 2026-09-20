@@ -406,6 +406,13 @@ function updateSignage() {
     // 読み込んだ最新データはサイクル境界まで保留し、表示中データへ戻す。
     window.signageData = activeSignageData;
     if (!hasRenderedActiveSignage) {
+        // 表示中のサイクルがなければ終了判定は発生しないため、最新データを即時採用する。
+        activeSignageData = incomingData;
+        activeSignageSignature = incomingSignature;
+        pendingSignageData = null;
+        pendingSignageSignature = "";
+        pendingNonNewsApplied = false;
+        window.signageData = activeSignageData;
         renderActiveSignage(0);
         return;
     }
@@ -926,6 +933,11 @@ function importWeatherData() {
 /* インフォデータの取得失敗時 */
 function infoDataFailed() {
     hasRenderedActiveSignage = false;
+    activeSignageData = null;
+    activeSignageSignature = "";
+    pendingSignageData = null;
+    pendingSignageSignature = "";
+    pendingNonNewsApplied = false;
     clearSlideTimer();
     clearEmergencyInfoTimer();
     const idleView = document.getElementById("idle-view");
