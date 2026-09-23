@@ -504,8 +504,13 @@ function Get-TargetSummary {
         if ($targetOrder.ContainsKey($id)) { return [int]$targetOrder[$id] }
         return 99
     })
+    $addedTargetIds = @{}
 
     foreach ($state in $orderedStates) {
+        $targetId = [string]$state.id
+        if ($addedTargetIds.ContainsKey($targetId)) { continue }
+        $addedTargetIds[$targetId] = $true
+
         $loss100 = Get-PacketLossPercent -Results $state.recentResults -Count 100
         $loss600 = Get-PacketLossPercent -Results $state.recentResults -Count 600
         $loss100SampleCount = [Math]::Min(100, $state.recentResults.Count)
@@ -515,7 +520,7 @@ function Get-TargetSummary {
         if ($last -and [string]$last.result -eq "オフライン") { $quality = Get-OfflineQualityLabel -Timestamp ([string]$last.timestamp) }
 
         [void]$result.Add([ordered]@{
-            id = $state.id
+            id = $targetId
             name = $state.name
             address = $state.address
             result = if ($last) { $last.result } else { "その他エラー" }

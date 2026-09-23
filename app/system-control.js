@@ -81,13 +81,25 @@
         return record.result !== "OK";
     }
 
+    function getUniqueTargets(summary = dashboardState.summary) {
+        const seenIds = new Set();
+        const targets = Array.isArray(summary?.targets) ? summary.targets : [];
+
+        return targets.filter((target) => {
+            const targetId = String(target?.id || "");
+            if (!targetId || seenIds.has(targetId)) return false;
+            seenIds.add(targetId);
+            return true;
+        });
+    }
+
     function getTarget(targetId) {
-        const targets = dashboardState.summary?.targets || [];
+        const targets = getUniqueTargets();
         return targets.find((target) => target.id === targetId) || targets[0] || null;
     }
 
     function hasCommunicationError(summary) {
-        const targets = summary?.targets || [];
+        const targets = getUniqueTargets(summary);
         return targets.some((target) => target.quality === "通信エラー");
     }
 
@@ -410,7 +422,7 @@
 
     function renderSummaryView() {
         const summary = dashboardState.summary;
-        const targets = summary?.targets || [];
+        const targets = getUniqueTargets(summary);
         const updatedAt = formatDateTime(summary?.updateTime);
         const errorHtml = dashboardState.errorMessage
             ? `<div class="network-dashboard-error">通信状況を取得できませんでした。${escapeHtml(dashboardState.errorMessage)}</div>`
@@ -437,7 +449,7 @@
     }
 
     function buildTargetTabs() {
-        const targets = dashboardState.summary?.targets || [];
+        const targets = getUniqueTargets();
         const labels = {
             internet: "Ping 8.8.8.8",
             gateway: "デフォルトゲートウェイ",
