@@ -1311,6 +1311,107 @@
     line-height: 1.35;
 }
 
+/* 4監視項目を常に操作できる通信状況ダッシュボード配置 */
+.network-summary-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    grid-auto-rows: max-content;
+    align-content: start;
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+
+.network-summary-card {
+    min-height: 0;
+    padding: 8px 10px;
+    overflow: visible;
+}
+
+.network-card-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: 42px;
+}
+
+.network-card-header h3 {
+    min-width: 0;
+    margin: 0;
+    font-size: 0.98rem;
+}
+
+.network-card-header .network-card-detail {
+    flex: 0 0 auto;
+    min-width: 76px;
+    min-height: 34px;
+    margin: 0;
+    padding: 0 8px;
+    font-size: 0.86rem;
+}
+
+.network-address {
+    margin-bottom: 6px;
+    font-size: 0.9rem;
+}
+
+.network-quality {
+    margin-bottom: 8px;
+}
+
+.network-summary-card .network-summary-section-title {
+    margin: 7px 0 5px;
+}
+
+.network-summary-card .network-summary-metrics {
+    gap: 2px 10px;
+    margin-bottom: 6px;
+    font-size: 0.92rem;
+}
+
+.network-data-card {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 2px 18px;
+}
+
+.network-data-card > .network-summary-section-title,
+.network-data-card > .network-summary-metrics {
+    grid-column: 1 / -1;
+}
+
+.network-data-card > .network-summary-metrics {
+    grid-template-columns: repeat(4, max-content minmax(0, 1fr));
+    gap: 4px 12px;
+}
+
+.network-data-card .network-data-update-item {
+    margin-bottom: 4px;
+}
+
+.network-detail-controls {
+    flex-wrap: wrap;
+}
+
+@media (max-width: 1050px) {
+    .network-summary-grid,
+    .network-detail-tabs {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    }
+
+    .network-data-card {
+        grid-template-columns: 1fr;
+    }
+
+    .network-data-card > .network-summary-section-title,
+    .network-data-card > .network-summary-metrics {
+        grid-column: 1;
+    }
+
+    .network-data-card > .network-summary-metrics {
+        grid-template-columns: minmax(0, 1fr) auto;
+    }
+}
+
 /* 通信履歴の対象期間をタッチ操作で指定する日時ステッパー。 */
 .network-date-modal-dialog:not(.is-stepper) {
     width: min(480px, calc(100vw - 160px));

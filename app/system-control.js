@@ -359,7 +359,10 @@
         const statusClass = qualityLabel === "オフライン" || qualityLabel === "通信エラー" ? "danger" : qualityLabel === "正常" ? "normal" : "warning";
         return `
             <section class="network-summary-card">
-                <h3>${escapeHtml(target.name)}</h3>
+                <div class="network-card-header">
+                    <h3>${escapeHtml(target.name)}</h3>
+                    <button class="network-card-detail" type="button" data-action="detail" data-target-id="${escapeHtml(target.id)}">ログ一覧</button>
+                </div>
                 <div class="network-address">対象：${escapeHtml(target.address || "-")}</div>
                 <div class="network-quality ${statusClass}"><span></span>${escapeHtml(qualityLabel)}</div>
                 <div class="network-summary-section-title">通信状況</div>
@@ -373,7 +376,6 @@
                     <dt>${escapeHtml(formatSampleHeaderLabel(100))}</dt><dd>${escapeHtml(formatMeasuredPercent(target.loss100Percent, target.loss100SampleCount, 100))}</dd>
                     <dt>${escapeHtml(formatSampleHeaderLabel(600))}</dt><dd>${escapeHtml(formatMeasuredPercent(target.loss600Percent, target.loss600SampleCount, 600))}</dd>
                 </dl>
-                <button class="network-card-detail" type="button" data-action="detail" data-target-id="${escapeHtml(target.id)}">詳細</button>
             </section>
         `;
     }
@@ -436,9 +438,15 @@
 
     function buildTargetTabs() {
         const targets = dashboardState.summary?.targets || [];
+        const labels = {
+            internet: "Ping 8.8.8.8",
+            gateway: "デフォルトゲートウェイ",
+            "dns-default": "nslookup（既定DNS）",
+            "dns-google": "nslookup（8.8.8.8）",
+        };
         return targets.map((target) => `
             <button class="network-tab ${target.id === dashboardState.targetId ? "is-active" : ""}" type="button" data-action="target" data-target-id="${escapeHtml(target.id)}">
-                ${escapeHtml(target.name || target.id)}
+                ${escapeHtml(labels[target.id] || target.name || target.id)}
             </button>
         `).join("");
     }
