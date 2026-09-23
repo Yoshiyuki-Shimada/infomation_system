@@ -7,6 +7,30 @@ const engVisible = {
     bus_msg: 5,
 };
 const OBON_SATURDAY_DATE_KEYS = ["2026-08-13", "2026-08-14"];
+const HOLIDAY_DATE_KEYS_2026 = new Set([
+    "2026-01-01",
+    "2026-01-02",
+    "2026-01-03",
+    "2026-01-12",
+    "2026-02-11",
+    "2026-02-23",
+    "2026-03-20",
+    "2026-04-29",
+    "2026-05-03",
+    "2026-05-04",
+    "2026-05-05",
+    "2026-05-06",
+    "2026-07-20",
+    "2026-08-11",
+    "2026-09-21",
+    "2026-09-22",
+    "2026-09-23",
+    "2026-10-12",
+    "2026-11-03",
+    "2026-11-23",
+    "2026-12-30",
+    "2026-12-31",
+]);
 const busDeveloperState = {
     characterMode: "random",
     testOverride: null,
@@ -37,35 +61,8 @@ const transferGuideMessages = {
  * 日本の祝日判定ロジック (2026年)
  */
 function isJapaneseHoliday(date) {
-    const m = date.getMonth() + 1;
-    const d = date.getDate();
-    const day = date.getDay();
-    const fixed = [`${m}/${d}`];
-    if (
-        [
-            "1/1",
-            "1/2",
-            "1/3",
-            "2/11",
-            "2/23",
-            "4/29",
-            "5/3",
-            "5/4",
-            "5/5",
-            "8/11",
-            "11/3",
-            "11/23",
-            "12/30",
-            "12/31",
-        ].includes(fixed[0])
-    )
-        return true;
-    if (day === 1 && (m === 1 || m === 10) && Math.floor((d - 1) / 7) + 1 === 2)
-        return true;
-    if (day === 1 && (m === 7 || m === 9) && Math.floor((d - 1) / 7) + 1 === 3)
-        return true;
-    if ((m === 3 && d === 20) || (m === 9 && d === 22)) return true;
-    return day === 0;
+    // 日曜と、振替休日・国民の休日を含む2026年の休日を休日ダイヤにする。
+    return date.getDay() === 0 || HOLIDAY_DATE_KEYS_2026.has(formatDateKey(date));
 }
 
 /**
