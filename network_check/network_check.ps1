@@ -233,7 +233,7 @@ function Convert-NslookupOutputToResultName {
     return "その他エラー"
 }
 
-function Invoke-NslookupMeasurement {
+function Start-NslookupMeasurement {
     param(
         [string]$TargetId,
         [string]$TargetName,
@@ -249,6 +249,19 @@ function Invoke-NslookupMeasurement {
     $commandText = "nslookup " + ($arguments -join " ")
     $stopwatch = [Diagnostics.Stopwatch]::StartNew()
     $process = $null
+    $context = [pscustomobject]@{
+        kind = "nslookup"
+        targetId = $TargetId
+        targetName = $TargetName
+        address = if ([string]::IsNullOrWhiteSpace($DnsServer)) { $QueryName } else { "$QueryName / $DnsServer" }
+        timestamp = $timestamp
+        commandText = $commandText
+        stopwatch = $stopwatch
+        process = $null
+        stdoutTask = $null
+        stderrTask = $null
+        immediateMeasurement = $null
+    }
 
     try {
         # PowerShellのNativeCommandErrorを介さず、プロセスの出力を文字列として直接取得する。
@@ -269,13 +282,48 @@ function Invoke-NslookupMeasurement {
         $process.StartInfo = $startInfo
         [void]$process.Start()
 
-        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
-        $stderrTask = $process.StandardError.ReadToEndAsync()
-        $process.WaitForExit()
-        $stdout = $stdoutTask.GetAwaiter().GetResult().Trim()
-        $stderr = $stderrTask.GetAwaiter().GetResult().Trim()
-        $exitCode = $process.ExitCode
+        $context.process = $process
+        $context.stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $context.stderrTask = $process.StandardError.ReadToEndAsync()
+    }
+    catch {
         $stopwatch.Stop()
+        if ($null -ne $process) { $process.Dispose() }
+        $context.immediateMeasurement = [ordered]@{
+            timestamp = $timestamp.ToString("o")
+            targetId = $TargetId
+            targetName = $TargetName
+            address = $context.address
+            result = "一般エラー"
+            ok = $false
+            responseTimeMs = $null
+            errorDetail = "$commandText`r`n$($_.Exception.Message)"
+        }
+    }
+
+    return $context
+}
+
+function Complete-NslookupMeasurement {
+    param([object]$Context)
+
+    if ($null -ne $Context.immediateMeasurement) {
+        return $Context.immediateMeasurement
+    }
+
+    if (-not $Context.process.HasExited -and ((Get-Date) - $Context.timestamp).TotalSeconds -lt 30) {
+        return $null
+    }
+
+    $forcedTimeout = -not $Context.process.HasExited
+    try {
+        if ($forcedTimeout) { $Context.process.Kill() }
+
+        $Context.process.WaitForExit()
+        $stdout = $Context.stdoutTask.GetAwaiter().GetResult().Trim()
+        $stderr = $Context.stderrTask.GetAwaiter().GetResult().Trim()
+        $exitCode = $Context.process.ExitCode
+        $Context.stopwatch.Stop()
 
         $outputParts = New-Object System.Collections.ArrayList
         if (-not [string]::IsNullOrWhiteSpace($stdout)) {
@@ -285,14 +333,19 @@ function Invoke-NslookupMeasurement {
             [void]$outputParts.Add($stderr)
         }
         $output = $outputParts -join "`r`n"
-        $resultName = Convert-NslookupOutputToResultName `
-            -Output $output `
-            -ExitCode $exitCode
+        $resultName = if ($forcedTimeout) {
+            "タイムアウト"
+        } else {
+            Convert-NslookupOutputToResultName -Output $output -ExitCode $exitCode
+        }
         $isOk = $resultName -eq "OK"
 
         $detailParts = New-Object System.Collections.ArrayList
-        [void]$detailParts.Add($commandText)
+        [void]$detailParts.Add($Context.commandText)
         [void]$detailParts.Add("Exit code: $exitCode")
+        if ($forcedTimeout) {
+            [void]$detailParts.Add("監視プロセスが30秒以内に終了しなかったため停止しました。")
+        }
         if (-not [string]::IsNullOrWhiteSpace($stdout)) {
             [void]$detailParts.Add("Standard output:`r`n$stdout")
         }
@@ -301,32 +354,176 @@ function Invoke-NslookupMeasurement {
         }
 
         return [ordered]@{
-            timestamp = $timestamp.ToString("o")
-            targetId = $TargetId
-            targetName = $TargetName
-            address = if ([string]::IsNullOrWhiteSpace($DnsServer)) { $QueryName } else { "$QueryName / $DnsServer" }
+            timestamp = $Context.timestamp.ToString("o")
+            targetId = $Context.targetId
+            targetName = $Context.targetName
+            address = $Context.address
             result = $resultName
             ok = $isOk
-            responseTimeMs = if ($isOk) { [int]$stopwatch.ElapsedMilliseconds } else { $null }
+            responseTimeMs = if ($isOk) { [int]$Context.stopwatch.ElapsedMilliseconds } else { $null }
             errorDetail = $detailParts -join "`r`n"
         }
     }
     catch {
-        $stopwatch.Stop()
+        if ($Context.stopwatch.IsRunning) { $Context.stopwatch.Stop() }
         return [ordered]@{
-            timestamp = $timestamp.ToString("o")
-            targetId = $TargetId
-            targetName = $TargetName
-            address = if ([string]::IsNullOrWhiteSpace($DnsServer)) { $QueryName } else { "$QueryName / $DnsServer" }
+            timestamp = $Context.timestamp.ToString("o")
+            targetId = $Context.targetId
+            targetName = $Context.targetName
+            address = $Context.address
             result = "一般エラー"
             ok = $false
             responseTimeMs = $null
-            errorDetail = "$commandText`r`n$($_.Exception.Message)"
+            errorDetail = "$($Context.commandText)`r`n$($_.Exception.Message)"
         }
     }
     finally {
-        if ($stopwatch.IsRunning) { $stopwatch.Stop() }
-        if ($null -ne $process) { $process.Dispose() }
+        if ($Context.stopwatch.IsRunning) { $Context.stopwatch.Stop() }
+        if ($null -ne $Context.process) { $Context.process.Dispose() }
+    }
+}
+
+function Invoke-NslookupMeasurement {
+    param(
+        [string]$TargetId,
+        [string]$TargetName,
+        [string]$QueryName,
+        [string]$DnsServer = ""
+    )
+
+    $context = Start-NslookupMeasurement `
+        -TargetId $TargetId `
+        -TargetName $TargetName `
+        -QueryName $QueryName `
+        -DnsServer $DnsServer
+    while ($true) {
+        $measurement = Complete-NslookupMeasurement -Context $context
+        if ($null -ne $measurement) { return $measurement }
+        Start-Sleep -Milliseconds 20
+    }
+}
+
+function Start-PingMeasurement {
+    param(
+        [string]$TargetId,
+        [string]$TargetName,
+        [string]$Address
+    )
+
+    $timestamp = Get-Date
+    $ping = $null
+    $context = [pscustomobject]@{
+        kind = "ping"
+        targetId = $TargetId
+        targetName = $TargetName
+        address = $Address
+        timestamp = $timestamp
+        ping = $null
+        task = $null
+        immediateMeasurement = $null
+    }
+
+    if ([string]::IsNullOrWhiteSpace($Address)) {
+        $context.immediateMeasurement = [ordered]@{
+            timestamp = $timestamp.ToString("o")
+            targetId = $TargetId
+            targetName = $TargetName
+            address = ""
+            result = "一般エラー"
+            ok = $false
+            responseTimeMs = $null
+            errorDetail = "監視対象のIPアドレスを取得できませんでした。"
+        }
+        return $context
+    }
+
+    try {
+        $ping = [System.Net.NetworkInformation.Ping]::new()
+        $context.ping = $ping
+        $context.task = $ping.SendPingAsync($Address)
+    }
+    catch {
+        if ($null -ne $ping) { $ping.Dispose() }
+        $context.immediateMeasurement = [ordered]@{
+            timestamp = $timestamp.ToString("o")
+            targetId = $TargetId
+            targetName = $TargetName
+            address = $Address
+            result = "一般エラー"
+            ok = $false
+            responseTimeMs = $null
+            errorDetail = $_.Exception.Message
+        }
+    }
+
+    return $context
+}
+
+function Complete-PingMeasurement {
+    param([object]$Context)
+
+    if ($null -ne $Context.immediateMeasurement) {
+        return $Context.immediateMeasurement
+    }
+    if (-not $Context.task.IsCompleted) {
+        if (((Get-Date) - $Context.timestamp).TotalSeconds -lt 30) {
+            return $null
+        }
+        $Context.ping.Dispose()
+        return [ordered]@{
+            timestamp = $Context.timestamp.ToString("o")
+            targetId = $Context.targetId
+            targetName = $Context.targetName
+            address = $Context.address
+            result = "タイムアウト"
+            ok = $false
+            responseTimeMs = $null
+            errorDetail = "Ping処理が30秒以内に終了しなかったため停止しました。"
+        }
+    }
+
+    try {
+        $reply = $Context.task.GetAwaiter().GetResult()
+        $resultName = Convert-PingStatusToResultName -Status $reply.Status
+        $responseTime = if ($reply.Status -eq [System.Net.NetworkInformation.IPStatus]::Success) { [int]$reply.RoundtripTime } else { $null }
+
+        return [ordered]@{
+            timestamp = $Context.timestamp.ToString("o")
+            targetId = $Context.targetId
+            targetName = $Context.targetName
+            address = $Context.address
+            result = $resultName
+            ok = ($reply.Status -eq [System.Net.NetworkInformation.IPStatus]::Success)
+            responseTimeMs = $responseTime
+            errorDetail = "Ping status: $($reply.Status)"
+        }
+    }
+    catch [System.Net.NetworkInformation.PingException] {
+        return [ordered]@{
+            timestamp = $Context.timestamp.ToString("o")
+            targetId = $Context.targetId
+            targetName = $Context.targetName
+            address = $Context.address
+            result = "一般エラー"
+            ok = $false
+            responseTimeMs = $null
+            errorDetail = $_.Exception.Message
+        }
+    }
+    catch {
+        return [ordered]@{
+            timestamp = $Context.timestamp.ToString("o")
+            targetId = $Context.targetId
+            targetName = $Context.targetName
+            address = $Context.address
+            result = "その他エラー"
+            ok = $false
+            responseTimeMs = $null
+            errorDetail = $_.Exception.Message
+        }
+    }
+    finally {
+        if ($null -ne $Context.ping) { $Context.ping.Dispose() }
     }
 }
 
@@ -337,64 +534,33 @@ function Invoke-NetworkMeasurement {
         [string]$Address
     )
 
-    $timestamp = Get-Date
-    if ([string]::IsNullOrWhiteSpace($Address)) {
-        return [ordered]@{
-            timestamp = $timestamp.ToString("o")
-            targetId = $TargetId
-            targetName = $TargetName
-            address = ""
-            result = "一般エラー"
-            ok = $false
-            responseTimeMs = $null
-            errorDetail = "監視対象のIPアドレスを取得できませんでした。"
-        }
+    $context = Start-PingMeasurement `
+        -TargetId $TargetId `
+        -TargetName $TargetName `
+        -Address $Address
+    while ($true) {
+        $measurement = Complete-PingMeasurement -Context $context
+        if ($null -ne $measurement) { return $measurement }
+        Start-Sleep -Milliseconds 20
     }
+}
 
-    $ping = [System.Net.NetworkInformation.Ping]::new()
-    try {
-        $reply = $ping.Send($Address)
-        $resultName = Convert-PingStatusToResultName -Status $reply.Status
-        $responseTime = if ($reply.Status -eq [System.Net.NetworkInformation.IPStatus]::Success) { [int]$reply.RoundtripTime } else { $null }
+function Stop-PendingMeasurementContexts {
+    param([System.Collections.IList]$Contexts)
 
-        return [ordered]@{
-            timestamp = $timestamp.ToString("o")
-            targetId = $TargetId
-            targetName = $TargetName
-            address = $Address
-            result = $resultName
-            ok = ($reply.Status -eq [System.Net.NetworkInformation.IPStatus]::Success)
-            responseTimeMs = $responseTime
-            errorDetail = "Ping status: $($reply.Status)"
+    foreach ($context in @($Contexts)) {
+        try {
+            if ($context.kind -eq "nslookup" -and $null -ne $context.process) {
+                if (-not $context.process.HasExited) { $context.process.Kill() }
+                $context.process.Dispose()
+            }
+            if ($context.kind -eq "ping" -and $null -ne $context.ping) {
+                $context.ping.Dispose()
+            }
         }
+        catch {}
     }
-    catch [System.Net.NetworkInformation.PingException] {
-        return [ordered]@{
-            timestamp = $timestamp.ToString("o")
-            targetId = $TargetId
-            targetName = $TargetName
-            address = $Address
-            result = "一般エラー"
-            ok = $false
-            responseTimeMs = $null
-            errorDetail = $_.Exception.Message
-        }
-    }
-    catch {
-        return [ordered]@{
-            timestamp = $timestamp.ToString("o")
-            targetId = $TargetId
-            targetName = $TargetName
-            address = $Address
-            result = "その他エラー"
-            ok = $false
-            responseTimeMs = $null
-            errorDetail = $_.Exception.Message
-        }
-    }
-    finally {
-        $ping.Dispose()
-    }
+    $Contexts.Clear()
 }
 function New-OfflineMeasurement {
     param(
@@ -691,6 +857,9 @@ if (-not [string]::IsNullOrWhiteSpace($gatewayAddress)) {
 
 Write-Host "Snow Link Drone - Network monitoring started..." -ForegroundColor Cyan
 
+$pendingMeasurements = New-Object System.Collections.ArrayList
+$measurementOrder = @("internet", "gateway", "dns-default", "dns-google")
+
 while ($true) {
     $loopStartedAt = Get-Date
     $currentDayKey = $loopStartedAt.ToString("yyyy-MM-dd")
@@ -717,41 +886,80 @@ while ($true) {
 
     $linkStatus = Get-NetworkLinkStatus
     $measurements = New-Object System.Collections.ArrayList
-    $measurementOrder = @("internet", "gateway", "dns-default", "dns-google")
     $orderedTargetStates = @($targetStates.Values | Sort-Object {
         $index = [Array]::IndexOf($measurementOrder, [string]$_.id)
         if ($index -ge 0) { return $index }
         return 99
     })
-    foreach ($state in $orderedTargetStates) {
-        if ([bool]$linkStatus.connected) {
+
+    if ([bool]$linkStatus.connected) {
+        # 各監視コマンドは毎秒開始し、完了待ちで次回の測定開始を遅らせない。
+        foreach ($state in $orderedTargetStates) {
             if ([string]$state.kind -eq "nslookup") {
-                $measurement = Invoke-NslookupMeasurement `
+                $context = Start-NslookupMeasurement `
                     -TargetId ([string]$state.id) `
                     -TargetName ([string]$state.name) `
                     -QueryName "google.com" `
                     -DnsServer ([string]$state.dnsServer)
             }
             else {
-                $measurement = Invoke-NetworkMeasurement `
+                $context = Start-PingMeasurement `
                     -TargetId ([string]$state.id) `
                     -TargetName ([string]$state.name) `
                     -Address ([string]$state.address)
             }
-        } else {
+            [void]$pendingMeasurements.Add($context)
+        }
+
+        # 同一対象は開始順に確定し、遅れて完了した結果で履歴の順序が逆転しないようにする。
+        $blockedTargetIds = @{}
+        $completedContexts = New-Object System.Collections.ArrayList
+        foreach ($context in @($pendingMeasurements.ToArray())) {
+            $targetId = [string]$context.targetId
+            if ($blockedTargetIds.ContainsKey($targetId)) { continue }
+
+            $measurement = if ([string]$context.kind -eq "nslookup") {
+                Complete-NslookupMeasurement -Context $context
+            }
+            else {
+                Complete-PingMeasurement -Context $context
+            }
+            if ($null -eq $measurement) {
+                $blockedTargetIds[$targetId] = $true
+                continue
+            }
+
+            [void]$measurements.Add($measurement)
+            [void]$completedContexts.Add($context)
+        }
+        foreach ($context in @($completedContexts.ToArray())) {
+            [void]$pendingMeasurements.Remove($context)
+        }
+    }
+    else {
+        # 切断時は実行中のコマンドを破棄し、各対象のオフライン結果を毎秒記録する。
+        Stop-PendingMeasurementContexts -Contexts $pendingMeasurements
+        foreach ($state in $orderedTargetStates) {
             $measurement = New-OfflineMeasurement `
                 -TargetId ([string]$state.id) `
                 -TargetName ([string]$state.name) `
                 -Address ([string]$state.address)
+            [void]$measurements.Add($measurement)
         }
-
-        Update-TargetState -TargetStates $targetStates -Measurement $measurement
-        [void]$measurements.Add($measurement)
     }
-    Add-NetworkSqliteMeasurements `
-        -SqliteExePath $sqliteExePath `
-        -DatabasePath $networkDbPath `
-        -Measurements @($measurements.ToArray())
+
+    $orderedMeasurements = @($measurements.ToArray() | Sort-Object {
+        [DateTimeOffset]::Parse([string]$_.timestamp)
+    })
+    foreach ($measurement in $orderedMeasurements) {
+        Update-TargetState -TargetStates $targetStates -Measurement $measurement
+    }
+    if ($orderedMeasurements.Count -gt 0) {
+        Add-NetworkSqliteMeasurements `
+            -SqliteExePath $sqliteExePath `
+            -DatabasePath $networkDbPath `
+            -Measurements $orderedMeasurements
+    }
 
     $offlineMode = Test-SystemOffline -LinkStatus $linkStatus
     if ($offlineMode) {
