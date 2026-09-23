@@ -862,16 +862,19 @@ Import-LegacyNetworkJsonlToSqlite `
     -SqliteExePath $sqliteExePath `
     -DatabasePath $networkDbPath `
     -LegacyJsonlPath $legacyNetworkJsonlPath
+Remove-InvalidDnsPingMeasurements `
+    -SqliteExePath $sqliteExePath `
+    -DatabasePath $networkDbPath
 
 $gatewayAddress = Get-DefaultGatewayAddress
 $targetStates = @{
     internet = New-TargetState -Id "internet" -Name "インターネット" -Address "8.8.8.8"
-    dnsDefault = New-TargetState `
+    "dns-default" = New-TargetState `
         -Id "dns-default" `
         -Name "DNS名前解決（システム既定）" `
         -Address "google.com" `
         -Kind "nslookup"
-    dnsGoogle = New-TargetState `
+    "dns-google" = New-TargetState `
         -Id "dns-google" `
         -Name "DNS名前解決（Google DNS）" `
         -Address "google.com / 8.8.8.8" `

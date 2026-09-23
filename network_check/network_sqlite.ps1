@@ -247,6 +247,27 @@ function Add-NetworkSqliteMeasurements {
         -Sql ($sqlParts -join "`n") | Out-Null
 }
 
+function Remove-InvalidDnsPingMeasurements {
+    param(
+        [string]$SqliteExePath,
+        [string]$DatabasePath
+    )
+
+    if (-not (Test-Path -LiteralPath $DatabasePath -PathType Leaf)) { return }
+
+    # DNS対象へ誤ってPingを実行していた版が保存した偽の一般エラーだけを除去する。
+    $sql = @"
+DELETE FROM network_measurements
+WHERE target_id IN ('dns-default', 'dns-google')
+  AND result = '一般エラー'
+  AND (error_detail IS NULL OR error_detail NOT LIKE 'nslookup %');
+"@
+    Invoke-NetworkSqliteCommand `
+        -SqliteExePath $SqliteExePath `
+        -DatabasePath $DatabasePath `
+        -Sql $sql | Out-Null
+}
+
 function Import-LegacyNetworkJsonlToSqlite {
     param(
         [string]$SqliteExePath,
