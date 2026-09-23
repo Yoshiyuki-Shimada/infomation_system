@@ -6,6 +6,20 @@
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
+# 同一DBへ複数の監視プロセスが記録しないよう、二重起動を防止する。
+$monitorMutex = [Threading.Mutex]::new($false, "Global\InfomationSystemNetworkMonitor")
+$monitorMutexAcquired = $false
+try {
+    $monitorMutexAcquired = $monitorMutex.WaitOne(0, $false)
+}
+catch [Threading.AbandonedMutexException] {
+    $monitorMutexAcquired = $true
+}
+if (-not $monitorMutexAcquired) {
+    $monitorMutex.Dispose()
+    exit 0
+}
+
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $rootPath = Split-Path -Parent $scriptDir
 $tempPath = Join-Path $rootPath "temp"
@@ -216,6 +230,16 @@ function Convert-PingStatusToResultName {
     }
 }
 
+function Wait-UntilTimestamp {
+    param([datetime]$Timestamp)
+
+    while ($true) {
+        $remainingMs = ($Timestamp - (Get-Date)).TotalMilliseconds
+        if ($remainingMs -le 0) { return }
+        Start-Sleep -Milliseconds ([Math]::Max(1, [Math]::Ceiling($remainingMs)))
+    }
+}
+
 function Convert-NslookupOutputToResultName {
     param(
         [string]$Output,
@@ -238,10 +262,11 @@ function Start-NslookupMeasurement {
         [string]$TargetId,
         [string]$TargetName,
         [string]$QueryName,
-        [string]$DnsServer = ""
+        [string]$DnsServer = "",
+        [object]$MeasurementTimestamp = $null
     )
 
-    $timestamp = Get-Date
+    $timestamp = if ($null -eq $MeasurementTimestamp) { Get-Date } else { [datetime]$MeasurementTimestamp }
     $arguments = @($QueryName)
     if (-not [string]::IsNullOrWhiteSpace($DnsServer)) {
         $arguments += $DnsServer
@@ -407,10 +432,11 @@ function Start-PingMeasurement {
     param(
         [string]$TargetId,
         [string]$TargetName,
-        [string]$Address
+        [string]$Address,
+        [object]$MeasurementTimestamp = $null
     )
 
-    $timestamp = Get-Date
+    $timestamp = if ($null -eq $MeasurementTimestamp) { Get-Date } else { [datetime]$MeasurementTimestamp }
     $ping = $null
     $context = [pscustomobject]@{
         kind = "ping"
@@ -566,10 +592,11 @@ function New-OfflineMeasurement {
     param(
         [string]$TargetId,
         [string]$TargetName,
-        [string]$Address
+        [string]$Address,
+        [object]$MeasurementTimestamp = $null
     )
 
-    $timestamp = Get-Date
+    $timestamp = if ($null -eq $MeasurementTimestamp) { Get-Date } else { [datetime]$MeasurementTimestamp }
     return [ordered]@{
         timestamp = $timestamp.ToString("o")
         targetId = $TargetId
@@ -859,9 +886,15 @@ Write-Host "Snow Link Drone - Network monitoring started..." -ForegroundColor Cy
 
 $pendingMeasurements = New-Object System.Collections.ArrayList
 $measurementOrder = @("internet", "gateway", "dns-default", "dns-google")
+$lastTargetLaunchTimes = @{}
+$previousLoopStartedAt = $null
 
 while ($true) {
+    if ($null -ne $previousLoopStartedAt) {
+        Wait-UntilTimestamp -Timestamp $previousLoopStartedAt.AddMilliseconds($monitorIntervalMs)
+    }
     $loopStartedAt = Get-Date
+    $previousLoopStartedAt = $loopStartedAt
     $currentDayKey = $loopStartedAt.ToString("yyyy-MM-dd")
     if ($currentDayKey -ne $script:todayKey) {
         $script:todayKey = $currentDayKey
@@ -895,19 +928,28 @@ while ($true) {
     if ([bool]$linkStatus.connected) {
         # 各監視コマンドは毎秒開始し、完了待ちで次回の測定開始を遅らせない。
         foreach ($state in $orderedTargetStates) {
+            $targetId = [string]$state.id
+            if ($lastTargetLaunchTimes.ContainsKey($targetId)) {
+                Wait-UntilTimestamp -Timestamp $lastTargetLaunchTimes[$targetId].AddMilliseconds($monitorIntervalMs)
+            }
+            $measurementTimestamp = Get-Date
+
             if ([string]$state.kind -eq "nslookup") {
                 $context = Start-NslookupMeasurement `
-                    -TargetId ([string]$state.id) `
+                    -TargetId $targetId `
                     -TargetName ([string]$state.name) `
                     -QueryName "google.com" `
-                    -DnsServer ([string]$state.dnsServer)
+                    -DnsServer ([string]$state.dnsServer) `
+                    -MeasurementTimestamp $measurementTimestamp
             }
             else {
                 $context = Start-PingMeasurement `
-                    -TargetId ([string]$state.id) `
+                    -TargetId $targetId `
                     -TargetName ([string]$state.name) `
-                    -Address ([string]$state.address)
+                    -Address ([string]$state.address) `
+                    -MeasurementTimestamp $measurementTimestamp
             }
+            $lastTargetLaunchTimes[$targetId] = $measurementTimestamp
             [void]$pendingMeasurements.Add($context)
         }
 
@@ -943,7 +985,8 @@ while ($true) {
             $measurement = New-OfflineMeasurement `
                 -TargetId ([string]$state.id) `
                 -TargetName ([string]$state.name) `
-                -Address ([string]$state.address)
+                -Address ([string]$state.address) `
+                -MeasurementTimestamp $loopStartedAt
             [void]$measurements.Add($measurement)
         }
     }
@@ -980,7 +1023,4 @@ while ($true) {
         $isOnline = $true
     }
 
-    $elapsedMs = ((Get-Date) - $loopStartedAt).TotalMilliseconds
-    $sleepMs = [Math]::Max(50, $monitorIntervalMs - [int]$elapsedMs)
-    Start-Sleep -Milliseconds $sleepMs
 }
