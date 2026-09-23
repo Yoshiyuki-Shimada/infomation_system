@@ -647,6 +647,7 @@
     function buildErrorDetailModal() {
         const record = dashboardState.selectedRecord;
         if (!record) return "";
+        const detailTitle = record.result === "OK" ? "応答内容" : "エラー内容";
 
         return `
             <div class="network-error-detail-backdrop" data-action="close-error-detail"></div>
@@ -655,7 +656,7 @@
                 <div>日付　${escapeHtml(formatDate(record.timestamp))}</div>
                 <div>時刻　${escapeHtml(formatTime(record.timestamp))}</div>
                 <div>結果　${escapeHtml(record.result || "-")}</div>
-                <div class="network-error-detail-title">エラー内容</div>
+                <div class="network-error-detail-title">${detailTitle}</div>
                 <pre>${escapeHtml(record.errorDetail || "詳細情報はありません。")}</pre>
             </div>
         `;

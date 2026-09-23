@@ -248,16 +248,57 @@ function Invoke-NslookupMeasurement {
     }
     $commandText = "nslookup " + ($arguments -join " ")
     $stopwatch = [Diagnostics.Stopwatch]::StartNew()
+    $process = $null
 
     try {
-        $outputLines = @(& nslookup.exe @arguments 2>&1)
-        $exitCode = $LASTEXITCODE
+        # PowerShellのNativeCommandErrorを介さず、プロセスの出力を文字列として直接取得する。
+        $startInfo = [Diagnostics.ProcessStartInfo]::new()
+        $startInfo.FileName = "nslookup.exe"
+        $startInfo.Arguments = $arguments -join " "
+        $startInfo.UseShellExecute = $false
+        $startInfo.CreateNoWindow = $true
+        $startInfo.RedirectStandardOutput = $true
+        $startInfo.RedirectStandardError = $true
+        $oemEncoding = [Text.Encoding]::GetEncoding(
+            [Globalization.CultureInfo]::CurrentCulture.TextInfo.OEMCodePage
+        )
+        $startInfo.StandardOutputEncoding = $oemEncoding
+        $startInfo.StandardErrorEncoding = $oemEncoding
+
+        $process = [Diagnostics.Process]::new()
+        $process.StartInfo = $startInfo
+        [void]$process.Start()
+
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $process.WaitForExit()
+        $stdout = $stdoutTask.GetAwaiter().GetResult().Trim()
+        $stderr = $stderrTask.GetAwaiter().GetResult().Trim()
+        $exitCode = $process.ExitCode
         $stopwatch.Stop()
-        $output = ($outputLines | Out-String).Trim()
+
+        $outputParts = New-Object System.Collections.ArrayList
+        if (-not [string]::IsNullOrWhiteSpace($stdout)) {
+            [void]$outputParts.Add($stdout)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($stderr)) {
+            [void]$outputParts.Add($stderr)
+        }
+        $output = $outputParts -join "`r`n"
         $resultName = Convert-NslookupOutputToResultName `
             -Output $output `
             -ExitCode $exitCode
         $isOk = $resultName -eq "OK"
+
+        $detailParts = New-Object System.Collections.ArrayList
+        [void]$detailParts.Add($commandText)
+        [void]$detailParts.Add("Exit code: $exitCode")
+        if (-not [string]::IsNullOrWhiteSpace($stdout)) {
+            [void]$detailParts.Add("Standard output:`r`n$stdout")
+        }
+        if (-not [string]::IsNullOrWhiteSpace($stderr)) {
+            [void]$detailParts.Add("Standard error:`r`n$stderr")
+        }
 
         return [ordered]@{
             timestamp = $timestamp.ToString("o")
@@ -267,7 +308,7 @@ function Invoke-NslookupMeasurement {
             result = $resultName
             ok = $isOk
             responseTimeMs = if ($isOk) { [int]$stopwatch.ElapsedMilliseconds } else { $null }
-            errorDetail = "$commandText`r`nExit code: $exitCode`r`n$output"
+            errorDetail = $detailParts -join "`r`n"
         }
     }
     catch {
@@ -285,6 +326,7 @@ function Invoke-NslookupMeasurement {
     }
     finally {
         if ($stopwatch.IsRunning) { $stopwatch.Stop() }
+        if ($null -ne $process) { $process.Dispose() }
     }
 }
 
