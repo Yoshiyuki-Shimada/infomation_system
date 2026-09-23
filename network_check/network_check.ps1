@@ -1,7 +1,7 @@
 ﻿# ============================================================================== 
 # Snow Link Drone - Network Monitoring System
 # File Name: network_check.ps1
-# Description: インターネット接続とデフォルトゲートウェイを常時監視します。
+# Description: PingとDNS名前解決でインターネット・ローカル通信を常時監視します。
 # ============================================================================== 
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -20,7 +20,7 @@ $legacyNetworkJsonlPath = $networkSqlitePaths.LegacyJsonlPath
 $sqliteExePath = $networkSqlitePaths.SqliteExePath
 $networkSummaryPath = Join-Path $runtimeDbDir "network_status_summary.json"
 $monitorIntervalMs = 1000
-$maxDbRows = 172800
+$maxDbRows = 345600
 
 $isOnline = $null
 $lastDbTrimAt = Get-Date "2000-01-01"
@@ -127,13 +127,17 @@ function New-TargetState {
     param(
         [string]$Id,
         [string]$Name,
-        [string]$Address
+        [string]$Address,
+        [string]$Kind = "ping",
+        [string]$DnsServer = ""
     )
 
     return [ordered]@{
         id = $Id
         name = $Name
         address = $Address
+        kind = $Kind
+        dnsServer = $DnsServer
         consecutiveFailures = 0
         consecutiveTimeouts = 0
         recentResults = New-Object System.Collections.ArrayList
@@ -209,6 +213,78 @@ function Convert-PingStatusToResultName {
         ([System.Net.NetworkInformation.IPStatus]::BadRoute) { return "一般エラー" }
         ([System.Net.NetworkInformation.IPStatus]::BadDestination) { return "一般エラー" }
         default { return "その他エラー" }
+    }
+}
+
+function Convert-NslookupOutputToResultName {
+    param(
+        [string]$Output,
+        [int]$ExitCode
+    )
+
+    if ($Output -match '(?i)timed[ -]?out|timeout|タイムアウト|時間切れ') {
+        return "タイムアウト"
+    }
+    if ($Output -match "(?i)can't find|non-existent domain|nxdomain|no response from server|server failed|到達できません|応答がありません|見つかりません") {
+        return "宛先到達不能"
+    }
+    if ($ExitCode -ne 0) { return "一般エラー" }
+    if ($Output -match '(?im)^\s*(Name|名前)\s*:') { return "OK" }
+    return "その他エラー"
+}
+
+function Invoke-NslookupMeasurement {
+    param(
+        [string]$TargetId,
+        [string]$TargetName,
+        [string]$QueryName,
+        [string]$DnsServer = ""
+    )
+
+    $timestamp = Get-Date
+    $arguments = @($QueryName)
+    if (-not [string]::IsNullOrWhiteSpace($DnsServer)) {
+        $arguments += $DnsServer
+    }
+    $commandText = "nslookup " + ($arguments -join " ")
+    $stopwatch = [Diagnostics.Stopwatch]::StartNew()
+
+    try {
+        $outputLines = @(& nslookup.exe @arguments 2>&1)
+        $exitCode = $LASTEXITCODE
+        $stopwatch.Stop()
+        $output = ($outputLines | Out-String).Trim()
+        $resultName = Convert-NslookupOutputToResultName `
+            -Output $output `
+            -ExitCode $exitCode
+        $isOk = $resultName -eq "OK"
+
+        return [ordered]@{
+            timestamp = $timestamp.ToString("o")
+            targetId = $TargetId
+            targetName = $TargetName
+            address = if ([string]::IsNullOrWhiteSpace($DnsServer)) { $QueryName } else { "$QueryName / $DnsServer" }
+            result = $resultName
+            ok = $isOk
+            responseTimeMs = if ($isOk) { [int]$stopwatch.ElapsedMilliseconds } else { $null }
+            errorDetail = "$commandText`r`nExit code: $exitCode`r`n$output"
+        }
+    }
+    catch {
+        $stopwatch.Stop()
+        return [ordered]@{
+            timestamp = $timestamp.ToString("o")
+            targetId = $TargetId
+            targetName = $TargetName
+            address = if ([string]::IsNullOrWhiteSpace($DnsServer)) { $QueryName } else { "$QueryName / $DnsServer" }
+            result = "一般エラー"
+            ok = $false
+            responseTimeMs = $null
+            errorDetail = "$commandText`r`n$($_.Exception.Message)"
+        }
+    }
+    finally {
+        if ($stopwatch.IsRunning) { $stopwatch.Stop() }
     }
 }
 
@@ -417,11 +493,23 @@ function Get-TargetSummary {
     param([hashtable]$TargetStates)
 
     $result = New-Object System.Collections.ArrayList
-    foreach ($state in @($TargetStates.Values)) {
+    $targetOrder = @{
+        internet = 0
+        gateway = 1
+        "dns-default" = 2
+        "dns-google" = 3
+    }
+    $orderedStates = @($TargetStates.Values | Sort-Object {
+        $id = [string]$_.id
+        if ($targetOrder.ContainsKey($id)) { return [int]$targetOrder[$id] }
+        return 99
+    })
+
+    foreach ($state in $orderedStates) {
         $loss100 = Get-PacketLossPercent -Results $state.recentResults -Count 100
         $loss600 = Get-PacketLossPercent -Results $state.recentResults -Count 600
-    $loss100SampleCount = [Math]::Min(100, $state.recentResults.Count)
-    $loss600SampleCount = [Math]::Min(600, $state.recentResults.Count)
+        $loss100SampleCount = [Math]::Min(100, $state.recentResults.Count)
+        $loss600SampleCount = [Math]::Min(600, $state.recentResults.Count)
         $quality = Get-QualityLabel -LossPercent $loss600 -ConsecutiveTimeouts ([int]$state.consecutiveTimeouts) -SampleCount $loss600SampleCount
         $last = $state.lastResult
         if ($last -and [string]$last.result -eq "オフライン") { $quality = Get-OfflineQualityLabel -Timestamp ([string]$last.timestamp) }
@@ -538,6 +626,17 @@ Import-LegacyNetworkJsonlToSqlite `
 $gatewayAddress = Get-DefaultGatewayAddress
 $targetStates = @{
     internet = New-TargetState -Id "internet" -Name "インターネット" -Address "8.8.8.8"
+    dnsDefault = New-TargetState `
+        -Id "dns-default" `
+        -Name "DNS名前解決（システム既定）" `
+        -Address "google.com" `
+        -Kind "nslookup"
+    dnsGoogle = New-TargetState `
+        -Id "dns-google" `
+        -Name "DNS名前解決（Google DNS）" `
+        -Address "google.com / 8.8.8.8" `
+        -Kind "nslookup" `
+        -DnsServer "8.8.8.8"
 }
 if (-not [string]::IsNullOrWhiteSpace($gatewayAddress)) {
     $targetStates.gateway = New-TargetState -Id "gateway" -Name "ローカルネットワーク（デフォルトゲートウェイ）" -Address $gatewayAddress
@@ -571,12 +670,27 @@ while ($true) {
 
     $linkStatus = Get-NetworkLinkStatus
     $measurements = New-Object System.Collections.ArrayList
-    foreach ($state in @($targetStates.Values)) {
+    $measurementOrder = @("internet", "gateway", "dns-default", "dns-google")
+    $orderedTargetStates = @($targetStates.Values | Sort-Object {
+        $index = [Array]::IndexOf($measurementOrder, [string]$_.id)
+        if ($index -ge 0) { return $index }
+        return 99
+    })
+    foreach ($state in $orderedTargetStates) {
         if ([bool]$linkStatus.connected) {
-            $measurement = Invoke-NetworkMeasurement `
-                -TargetId ([string]$state.id) `
-                -TargetName ([string]$state.name) `
-                -Address ([string]$state.address)
+            if ([string]$state.kind -eq "nslookup") {
+                $measurement = Invoke-NslookupMeasurement `
+                    -TargetId ([string]$state.id) `
+                    -TargetName ([string]$state.name) `
+                    -QueryName "google.com" `
+                    -DnsServer ([string]$state.dnsServer)
+            }
+            else {
+                $measurement = Invoke-NetworkMeasurement `
+                    -TargetId ([string]$state.id) `
+                    -TargetName ([string]$state.name) `
+                    -Address ([string]$state.address)
+            }
         } else {
             $measurement = New-OfflineMeasurement `
                 -TargetId ([string]$state.id) `

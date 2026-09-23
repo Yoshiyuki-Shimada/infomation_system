@@ -360,7 +360,7 @@
         return `
             <section class="network-summary-card">
                 <h3>${escapeHtml(target.name)}</h3>
-                <div class="network-address">IP：${escapeHtml(target.address || "-")}</div>
+                <div class="network-address">対象：${escapeHtml(target.address || "-")}</div>
                 <div class="network-quality ${statusClass}"><span></span>${escapeHtml(qualityLabel)}</div>
                 <div class="network-summary-section-title">通信状況</div>
                 <dl class="network-summary-metrics">
@@ -438,7 +438,7 @@
         const targets = dashboardState.summary?.targets || [];
         return targets.map((target) => `
             <button class="network-tab ${target.id === dashboardState.targetId ? "is-active" : ""}" type="button" data-action="target" data-target-id="${escapeHtml(target.id)}">
-                ${target.id === "internet" ? "インターネット" : "ゲートウェイ"}
+                ${escapeHtml(target.name || target.id)}
             </button>
         `).join("");
     }
@@ -530,7 +530,7 @@
                 <div class="network-detail-tabs">${buildTargetTabs()}</div>
                 <div class="network-detail-body">
                     <div class="network-detail-info">
-                        <div>IP：${escapeHtml(target?.address || "-")}</div>
+                        <div>対象：${escapeHtml(target?.address || "-")}</div>
                         <div>対象期間：${escapeHtml(getTargetPeriodText())}</div>
                         <div>表示件数：${escapeHtml(records.length)} 件</div>
                     </div>

@@ -33,7 +33,12 @@
         const targets = Array.isArray(summary?.targets)
             ? summary.targets
             : [];
-        const requiredTargetIds = ["internet", "gateway"];
+        const requiredTargetIds = [
+            "internet",
+            "gateway",
+            "dns-default",
+            "dns-google",
+        ];
         const qualities = requiredTargetIds.map((targetId) => {
             const target = targets.find((item) => item.id === targetId);
             return target?.quality;

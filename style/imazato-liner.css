@@ -519,9 +519,10 @@
     flex: 1 1 auto;
     min-height: 0;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(280px, 0.85fr);
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     border: 2px solid var(--snow-white);
-    overflow: hidden;
+    overflow: auto;
+    align-content: start;
 }
 
 .network-summary-card {
@@ -529,9 +530,17 @@
     padding: 10px 12px;
     border-right: 2px solid var(--snow-white);
     overflow: hidden;
+    display: flex;
+    flex-direction: column;
 }
 
-.network-summary-card:last-child {
+.network-data-card {
+    grid-column: 1 / -1;
+    border-top: 2px solid var(--snow-white);
+}
+
+.network-summary-card:nth-child(4),
+.network-data-card {
     border-right: 0;
 }
 
@@ -625,7 +634,7 @@
 
 .network-detail-tabs {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     border: 2px solid var(--snow-white);
 }
 
@@ -1049,6 +1058,11 @@
 
     .network-inline-detail-panel pre {
         height: 68px;
+    }
+
+    .network-summary-grid,
+    .network-detail-tabs {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }
 
