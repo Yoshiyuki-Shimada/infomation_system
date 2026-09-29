@@ -772,51 +772,29 @@ function importWeatherData() {
         const now = new Date();
 
         /**
-         * WMOコードをGoogle WeatherアイコンURLに変換
-         * 背景が黒なので指示通り末尾に "_dark.svg" を追加するよ！
+         * WMO天気コードをローカルの手描き天気アイコンへ変換する。
+         * 晴れ・晴れ時々曇り・一部曇りは昼夜で画像を切り替える。
          */
         const getGoogleWeatherIcon = (code, isDay = 1) => {
-            let name = "error"; // デフォルト
+            const daySuffix = Number(isDay) === 1 ? "day" : "night";
+            let name = "unknown";
 
-            // 雷雨系はダーク版のファイル名が異なるため、指定URLを直接返す。
-            if (code === 95) {
-                return "https://maps.gstatic.com/weather/v1/strong_tstorms.svg";
-            }
-            if (code === 96 || code === 99) {
-                return "https://maps.gstatic.com/weather/v1/sleet_hail.svg";
-            }
-            if (code >= 80 && code <= 82) {
-                return "https://maps.gstatic.com/weather/v1/isolated_tstorms.svg";
-            }
+            if (code === 0) name = `clear-${daySuffix}`;
+            else if (code === 1) name = `mostly-clear-${daySuffix}`;
+            else if (code === 2) name = `partly-cloudy-${daySuffix}`;
+            else if (code === 3) name = "cloudy";
+            else if (code === 45 || code === 48) name = "fog";
+            else if ([51, 53, 55].includes(code)) name = "drizzle";
+            else if ([56, 57, 66, 67].includes(code)) name = "sleet";
+            else if ([61, 80].includes(code)) name = "light-rain";
+            else if ([63, 81].includes(code)) name = "rain";
+            else if ([65, 82].includes(code)) name = "heavy-rain";
+            else if ([71, 73, 75, 77].includes(code)) name = "snow";
+            else if ([85, 86].includes(code)) name = "snow-showers";
+            else if (code === 95) name = "thunderstorm";
+            else if (code === 96 || code === 99) name = "thunderstorm-hail";
 
-            if (code === 0) {
-                // CLEAR (image_10386a)
-                name = "sunny";
-            } else if (code === 1) {
-                // MOSTLY_CLEAR (image_10386a)
-                name = "mostly_sunny";
-            } else if (code === 2) {
-                // PARTLY_CLOUDY (image_10386a)
-                name = "partly_cloudy";
-            } else if (code === 3) {
-                // CLOUDY (image_10386a)
-                name = "cloudy";
-            } else if (code >= 45 && code <= 48) {
-                // 霧：要件の表にないため「cloudy」を使用
-                name = "cloudy";
-            } else if (code >= 51 && code <= 55) {
-                // LIGHT_RAIN (image_10388e)
-                name = "drizzle";
-            } else if (code >= 61 && code <= 67) {
-                // RAIN (image_10388e)
-                name = "showers";
-            } else if (code >= 71 && code <= 77) {
-                // SNOW (image_1038ab)
-                name = "snow";
-            }
-
-            // 指定のベースURIに基づき、ダークモード用のSVGを返すよ
-            return `https://maps.gstatic.com/weather/v1/${name}_dark.svg`;
+            return `img/weather/${name}.png`;
         };
 
         const getDisplayWeatherCode = (code, precipitationProbability) => {
@@ -836,23 +814,23 @@ function importWeatherData() {
             3: "曇り",
             45: "霧",
             48: "霧氷",
-            51: "霧雨",
+            51: "弱い霧雨",
             53: "霧雨",
-            55: "霧雨",
+            55: "強い霧雨",
             56: "霧雨（凍雨を伴う）",
             57: "霧雨（凍雨を伴う）",
-            61: "雨",
+            61: "小雨",
             63: "雨",
-            65: "雨",
+            65: "大雨",
             66: "雨（凍雨を伴う）",
             67: "雨（凍雨を伴う）",
             71: "雪",
             73: "雪",
             75: "雪",
             77: "雪粒子",
-            80: "にわか雨",
+            80: "弱いにわか雨",
             81: "にわか雨",
-            82: "にわか雨",
+            82: "激しいにわか雨",
             85: "にわか雪",
             86: "にわか雪",
             95: "雷雨",
@@ -952,16 +930,23 @@ function importWeatherData() {
             ),
         );
 
-        // --- スライド2：明日の天気サマリー ---
-        const tomorrowCode = w.daily.weathercode[1];
-        weatherList.push(
-            createWeatherDataHtmlTomorrow(
-                getGoogleWeatherIcon,
-                tomorrowCode,
-                wMap,
-                w,
-            ),
+        // --- スライド2：気象庁APIによる明日の天気サマリー ---
+        const tomorrow = new Date(now);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const tomorrowDateKey = [
+            tomorrow.getFullYear(),
+            String(tomorrow.getMonth() + 1).padStart(2, "0"),
+            String(tomorrow.getDate()).padStart(2, "0"),
+        ].join("-");
+        const tomorrowForecast = signageData.weeklyWeather?.days?.find(
+            (forecast) => forecast.date === tomorrowDateKey,
         );
+
+        if (tomorrowForecast) {
+            weatherList.push(
+                createWeatherDataHtmlTomorrow(tomorrowForecast),
+            );
+        }
 
         if (signageData.weeklyWeather?.days?.length) {
             weatherList.push(

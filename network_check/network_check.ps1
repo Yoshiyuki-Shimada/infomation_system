@@ -33,11 +33,25 @@ $networkDbPath = $networkSqlitePaths.DatabasePath
 $legacyNetworkJsonlPath = $networkSqlitePaths.LegacyJsonlPath
 $sqliteExePath = $networkSqlitePaths.SqliteExePath
 $networkSummaryPath = Join-Path $runtimeDbDir "network_status_summary.json"
+$networkMonitorLogPath = Join-Path $runtimeDbDir "network_monitor_errors.log"
 $monitorIntervalMs = 1000
 $maxDbRows = 345600
+$monitorStartedAt = Get-Date
+$lastBootTime = try {
+    (Get-CimInstance Win32_OperatingSystem -ErrorAction Stop).LastBootUpTime
+}
+catch {
+    $monitorStartedAt
+}
+Add-Type -AssemblyName System.Net.Http
+$webHttpHandler = [Net.Http.HttpClientHandler]::new()
+$webHttpHandler.AllowAutoRedirect = $true
+$webHttpClient = [Net.Http.HttpClient]::new($webHttpHandler)
+$webHttpClient.Timeout = [Threading.Timeout]::InfiniteTimeSpan
 
 $isOnline = $null
 $lastDbTrimAt = Get-Date "2000-01-01"
+$lastGatewayRefreshAt = Get-Date "2000-01-01"
 $todayKey = (Get-Date).ToString("yyyy-MM-dd")
 $todayStats = @{
     offlineCount = 0
@@ -59,7 +73,25 @@ function Write-Utf8JsonFile {
     )
 
     $json = $Value | ConvertTo-Json -Depth 12
-    [IO.File]::WriteAllText($Path, $json, [Text.UTF8Encoding]::new($false))
+    $temporaryPath = "$Path.$PID.tmp"
+    $backupPath = "$Path.$PID.bak"
+    try {
+        [IO.File]::WriteAllText($temporaryPath, $json, [Text.UTF8Encoding]::new($false))
+        if (Test-Path -LiteralPath $Path -PathType Leaf) {
+            [IO.File]::Replace($temporaryPath, $Path, $backupPath)
+        }
+        else {
+            [IO.File]::Move($temporaryPath, $Path)
+        }
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporaryPath -PathType Leaf) {
+            Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue
+        }
+        if (Test-Path -LiteralPath $backupPath -PathType Leaf) {
+            Remove-Item -LiteralPath $backupPath -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 function Trim-NetworkDatabase {
@@ -143,7 +175,10 @@ function New-TargetState {
         [string]$Name,
         [string]$Address,
         [string]$Kind = "ping",
-        [string]$DnsServer = ""
+        [string]$DnsServer = "",
+        [string]$HostName = "",
+        [int]$Port = 0,
+        [string]$Uri = ""
     )
 
     return [ordered]@{
@@ -152,8 +187,12 @@ function New-TargetState {
         address = $Address
         kind = $Kind
         dnsServer = $DnsServer
+        hostName = $HostName
+        port = $Port
+        uri = $Uri
         consecutiveFailures = 0
         consecutiveTimeouts = 0
+        measurementCount = 0
         recentResults = New-Object System.Collections.ArrayList
         lastResult = $null
     }
@@ -183,11 +222,12 @@ function Get-QualityLabel {
     param(
         [double]$LossPercent,
         [int]$ConsecutiveTimeouts,
-        [int]$SampleCount
+        [int]$SampleCount,
+        [int]$RequiredSampleCount = 600
     )
 
     if ($ConsecutiveTimeouts -ge 5) { return "通信エラー" }
-    if ($SampleCount -lt 600) { return "計測中" }
+    if ($SampleCount -lt $RequiredSampleCount) { return "計測中" }
     if ($LossPercent -ge 10) { return "通信が非常に不安定" }
     if ($LossPercent -ge 5) { return "通信品質異常" }
     if ($LossPercent -ge 2) { return "通信品質低下" }
@@ -227,6 +267,23 @@ function Convert-PingStatusToResultName {
         ([System.Net.NetworkInformation.IPStatus]::BadRoute) { return "一般エラー" }
         ([System.Net.NetworkInformation.IPStatus]::BadDestination) { return "一般エラー" }
         default { return "その他エラー" }
+    }
+}
+
+function Write-NetworkMonitorError {
+    param([string]$Message)
+
+    try {
+        Ensure-RuntimeDirectory
+        $line = "{0} [ERROR] {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"), $Message
+        [IO.File]::AppendAllText(
+            $networkMonitorLogPath,
+            $line + [Environment]::NewLine,
+            [Text.UTF8Encoding]::new($false)
+        )
+    }
+    catch {
+        Write-Host "通信監視エラーログの保存に失敗: $($_.Exception.Message)" -ForegroundColor DarkYellow
     }
 }
 
@@ -571,6 +628,216 @@ function Invoke-NetworkMeasurement {
     }
 }
 
+function Start-TcpMeasurement {
+    param(
+        [string]$TargetId,
+        [string]$TargetName,
+        [string]$HostName,
+        [int]$Port,
+        [object]$MeasurementTimestamp = $null
+    )
+
+    $timestamp = if ($null -eq $MeasurementTimestamp) { Get-Date } else { [datetime]$MeasurementTimestamp }
+    $client = [Net.Sockets.TcpClient]::new()
+    $context = [pscustomobject]@{
+        kind = "tcp"
+        targetId = $TargetId
+        targetName = $TargetName
+        address = "$HostName`:$Port"
+        timestamp = $timestamp
+        commandText = "Test-NetConnection $HostName -Port $Port"
+        stopwatch = [Diagnostics.Stopwatch]::StartNew()
+        client = $client
+        task = $null
+        immediateMeasurement = $null
+    }
+
+    try {
+        $context.task = $client.ConnectAsync($HostName, $Port)
+    }
+    catch {
+        $context.stopwatch.Stop()
+        $client.Dispose()
+        $context.immediateMeasurement = [ordered]@{
+            timestamp = $timestamp.ToString("o")
+            targetId = $TargetId
+            targetName = $TargetName
+            address = $context.address
+            result = "一般エラー"
+            ok = $false
+            responseTimeMs = $null
+            errorDetail = "$($context.commandText)`r`n$($_.Exception.Message)"
+        }
+    }
+    return $context
+}
+
+function Complete-TcpMeasurement {
+    param([object]$Context)
+
+    if ($null -ne $Context.immediateMeasurement) { return $Context.immediateMeasurement }
+    if (-not $Context.task.IsCompleted -and $Context.stopwatch.Elapsed.TotalSeconds -lt 10) {
+        return $null
+    }
+    if (-not $Context.task.IsCompleted) {
+        $Context.stopwatch.Stop()
+        $Context.client.Dispose()
+        return [ordered]@{
+            timestamp = $Context.timestamp.ToString("o")
+            targetId = $Context.targetId
+            targetName = $Context.targetName
+            address = $Context.address
+            result = "タイムアウト"
+            ok = $false
+            responseTimeMs = $null
+            errorDetail = "$($Context.commandText)`r`nTCP接続が10秒以内に完了しませんでした。"
+        }
+    }
+
+    try {
+        [void]$Context.task.GetAwaiter().GetResult()
+        $Context.stopwatch.Stop()
+        $isOk = [bool]$Context.client.Connected
+        return [ordered]@{
+            timestamp = $Context.timestamp.ToString("o")
+            targetId = $Context.targetId
+            targetName = $Context.targetName
+            address = $Context.address
+            result = if ($isOk) { "OK" } else { "一般エラー" }
+            ok = $isOk
+            responseTimeMs = if ($isOk) { [int]$Context.stopwatch.ElapsedMilliseconds } else { $null }
+            errorDetail = "$($Context.commandText)`r`nTcpTestSucceeded: $isOk"
+        }
+    }
+    catch {
+        if ($Context.stopwatch.IsRunning) { $Context.stopwatch.Stop() }
+        return [ordered]@{
+            timestamp = $Context.timestamp.ToString("o")
+            targetId = $Context.targetId
+            targetName = $Context.targetName
+            address = $Context.address
+            result = "一般エラー"
+            ok = $false
+            responseTimeMs = $null
+            errorDetail = "$($Context.commandText)`r`n$($_.Exception.GetBaseException().Message)"
+        }
+    }
+    finally {
+        $Context.client.Dispose()
+    }
+}
+
+function Start-WebMeasurement {
+    param(
+        [string]$TargetId,
+        [string]$TargetName,
+        [string]$Uri,
+        [object]$MeasurementTimestamp = $null
+    )
+
+    $timestamp = if ($null -eq $MeasurementTimestamp) { Get-Date } else { [datetime]$MeasurementTimestamp }
+    $request = [Net.Http.HttpRequestMessage]::new([Net.Http.HttpMethod]::Head, $Uri)
+    [void]$request.Headers.TryAddWithoutValidation("User-Agent", "Mozilla/5.0 NetworkMonitor/1.0")
+    $cancellation = [Threading.CancellationTokenSource]::new()
+    $cancellation.CancelAfter([TimeSpan]::FromSeconds(10))
+    $context = [pscustomobject]@{
+        kind = "web"
+        targetId = $TargetId
+        targetName = $TargetName
+        address = $Uri
+        timestamp = $timestamp
+        commandText = "Invoke-WebRequest $Uri -Method Head -TimeoutSec 10"
+        stopwatch = [Diagnostics.Stopwatch]::StartNew()
+        request = $request
+        cancellation = $cancellation
+        task = $null
+        immediateMeasurement = $null
+    }
+
+    try {
+        $context.task = $script:webHttpClient.SendAsync(
+            $request,
+            [Net.Http.HttpCompletionOption]::ResponseHeadersRead,
+            $cancellation.Token
+        )
+    }
+    catch {
+        $context.stopwatch.Stop()
+        $request.Dispose()
+        $cancellation.Dispose()
+        $context.immediateMeasurement = [ordered]@{
+            timestamp = $timestamp.ToString("o")
+            targetId = $TargetId
+            targetName = $TargetName
+            address = $Uri
+            result = "一般エラー"
+            ok = $false
+            responseTimeMs = $null
+            errorDetail = "$($context.commandText)`r`n$($_.Exception.GetBaseException().Message)"
+        }
+    }
+    return $context
+}
+
+function Complete-WebMeasurement {
+    param([object]$Context)
+
+    if ($null -ne $Context.immediateMeasurement) { return $Context.immediateMeasurement }
+    if (-not $Context.task.IsCompleted -and $Context.stopwatch.Elapsed.TotalSeconds -lt 12) {
+        return $null
+    }
+    if (-not $Context.task.IsCompleted) { $Context.cancellation.Cancel() }
+
+    $response = $null
+    try {
+        $response = $Context.task.GetAwaiter().GetResult()
+        $Context.stopwatch.Stop()
+        $isOk = [bool]$response.IsSuccessStatusCode
+        $statusCode = [int]$response.StatusCode
+        return [ordered]@{
+            timestamp = $Context.timestamp.ToString("o")
+            targetId = $Context.targetId
+            targetName = $Context.targetName
+            address = $Context.address
+            result = if ($isOk) { "OK" } else { "一般エラー" }
+            ok = $isOk
+            responseTimeMs = if ($isOk) { [int]$Context.stopwatch.ElapsedMilliseconds } else { $null }
+            errorDetail = "$($Context.commandText)`r`nHTTP status: $statusCode $($response.ReasonPhrase)"
+        }
+    }
+    catch [OperationCanceledException] {
+        if ($Context.stopwatch.IsRunning) { $Context.stopwatch.Stop() }
+        return [ordered]@{
+            timestamp = $Context.timestamp.ToString("o")
+            targetId = $Context.targetId
+            targetName = $Context.targetName
+            address = $Context.address
+            result = "タイムアウト"
+            ok = $false
+            responseTimeMs = $null
+            errorDetail = "$($Context.commandText)`r`nHTTPS要求が10秒以内に完了しませんでした。"
+        }
+    }
+    catch {
+        if ($Context.stopwatch.IsRunning) { $Context.stopwatch.Stop() }
+        return [ordered]@{
+            timestamp = $Context.timestamp.ToString("o")
+            targetId = $Context.targetId
+            targetName = $Context.targetName
+            address = $Context.address
+            result = "一般エラー"
+            ok = $false
+            responseTimeMs = $null
+            errorDetail = "$($Context.commandText)`r`n$($_.Exception.GetBaseException().Message)"
+        }
+    }
+    finally {
+        if ($null -ne $response) { $response.Dispose() }
+        $Context.request.Dispose()
+        $Context.cancellation.Dispose()
+    }
+}
+
 function Stop-PendingMeasurementContexts {
     param([System.Collections.IList]$Contexts)
 
@@ -582,6 +849,14 @@ function Stop-PendingMeasurementContexts {
             }
             if ($context.kind -eq "ping" -and $null -ne $context.ping) {
                 $context.ping.Dispose()
+            }
+            if ($context.kind -eq "tcp" -and $null -ne $context.client) {
+                $context.client.Dispose()
+            }
+            if ($context.kind -eq "web" -and $null -ne $context.cancellation) {
+                $context.cancellation.Cancel()
+                $context.request.Dispose()
+                $context.cancellation.Dispose()
             }
         }
         catch {}
@@ -607,6 +882,24 @@ function New-OfflineMeasurement {
         responseTimeMs = $null
         errorDetail = "有線LANとWi-Fiがどちらも未接続です。"
     }
+}
+
+function Set-MeasurementValue {
+    param(
+        [object]$Measurement,
+        [string]$Name,
+        [object]$Value
+    )
+
+    if ($Measurement -is [Collections.IDictionary]) {
+        $Measurement[$Name] = $Value
+        return
+    }
+    if ($Measurement.PSObject.Properties.Name -contains $Name) {
+        $Measurement.$Name = $Value
+        return
+    }
+    $Measurement | Add-Member -NotePropertyName $Name -NotePropertyValue $Value
 }
 
 function Update-TargetState {
@@ -642,25 +935,34 @@ function Update-TargetState {
 
     if ([string]$Measurement.result -ne "オフライン") {
         [void]$state.recentResults.Add([bool]$Measurement.ok)
+        $state.measurementCount = [long]$state.measurementCount + 1
     }
-    while ($state.recentResults.Count -gt 600) {
+    while ($state.recentResults.Count -gt 21600) {
         $state.recentResults.RemoveAt(0)
     }
 
     $loss100 = Get-PacketLossPercent -Results $state.recentResults -Count 100
     $loss600 = Get-PacketLossPercent -Results $state.recentResults -Count 600
+    $loss3600 = Get-PacketLossPercent -Results $state.recentResults -Count 3600
+    $loss21600 = Get-PacketLossPercent -Results $state.recentResults -Count 21600
     $loss100SampleCount = [Math]::Min(100, $state.recentResults.Count)
     $loss600SampleCount = [Math]::Min(600, $state.recentResults.Count)
+    $loss3600SampleCount = [Math]::Min(3600, $state.recentResults.Count)
+    $loss21600SampleCount = [Math]::Min(21600, $state.recentResults.Count)
     $quality = Get-QualityLabel -LossPercent $loss600 -ConsecutiveTimeouts ([int]$state.consecutiveTimeouts) -SampleCount $loss600SampleCount
     if ([string]$Measurement.result -eq "オフライン") { $quality = Get-OfflineQualityLabel -Timestamp ([string]$Measurement.timestamp) }
 
-    $Measurement.consecutiveFailures = [int]$state.consecutiveFailures
-    $Measurement.consecutiveTimeouts = [int]$state.consecutiveTimeouts
-    $Measurement.loss100Percent = $loss100
-    $Measurement.loss600Percent = $loss600
-    $Measurement.loss100SampleCount = $loss100SampleCount
-    $Measurement.loss600SampleCount = $loss600SampleCount
-    $Measurement.quality = $quality
+    Set-MeasurementValue -Measurement $Measurement -Name "consecutiveFailures" -Value ([int]$state.consecutiveFailures)
+    Set-MeasurementValue -Measurement $Measurement -Name "consecutiveTimeouts" -Value ([int]$state.consecutiveTimeouts)
+    Set-MeasurementValue -Measurement $Measurement -Name "loss100Percent" -Value $loss100
+    Set-MeasurementValue -Measurement $Measurement -Name "loss600Percent" -Value $loss600
+    Set-MeasurementValue -Measurement $Measurement -Name "loss3600Percent" -Value $loss3600
+    Set-MeasurementValue -Measurement $Measurement -Name "loss21600Percent" -Value $loss21600
+    Set-MeasurementValue -Measurement $Measurement -Name "loss100SampleCount" -Value $loss100SampleCount
+    Set-MeasurementValue -Measurement $Measurement -Name "loss600SampleCount" -Value $loss600SampleCount
+    Set-MeasurementValue -Measurement $Measurement -Name "loss3600SampleCount" -Value $loss3600SampleCount
+    Set-MeasurementValue -Measurement $Measurement -Name "loss21600SampleCount" -Value $loss21600SampleCount
+    Set-MeasurementValue -Measurement $Measurement -Name "quality" -Value $quality
 
     if (-not [bool]$Measurement.ok) {
         $script:todayStats.lastLossAt = $Measurement.timestamp
@@ -733,6 +1035,9 @@ function Get-TargetSummary {
         gateway = 1
         "dns-default" = 2
         "dns-google" = 3
+        "tcp-google-443" = 4
+        "web-google" = 5
+        "web-microsoft" = 6
     }
     $orderedStates = @($TargetStates.Values | Sort-Object {
         $id = [string]$_.id
@@ -748,9 +1053,15 @@ function Get-TargetSummary {
 
         $loss100 = Get-PacketLossPercent -Results $state.recentResults -Count 100
         $loss600 = Get-PacketLossPercent -Results $state.recentResults -Count 600
+        $loss3600 = Get-PacketLossPercent -Results $state.recentResults -Count 3600
+        $loss21600 = Get-PacketLossPercent -Results $state.recentResults -Count 21600
         $loss100SampleCount = [Math]::Min(100, $state.recentResults.Count)
         $loss600SampleCount = [Math]::Min(600, $state.recentResults.Count)
+        $loss3600SampleCount = [Math]::Min(3600, $state.recentResults.Count)
+        $loss21600SampleCount = [Math]::Min(21600, $state.recentResults.Count)
         $quality = Get-QualityLabel -LossPercent $loss600 -ConsecutiveTimeouts ([int]$state.consecutiveTimeouts) -SampleCount $loss600SampleCount
+        $quality3600 = Get-QualityLabel -LossPercent $loss3600 -ConsecutiveTimeouts 0 -SampleCount $loss3600SampleCount -RequiredSampleCount 3600
+        $quality21600 = Get-QualityLabel -LossPercent $loss21600 -ConsecutiveTimeouts 0 -SampleCount $loss21600SampleCount -RequiredSampleCount 21600
         $last = $state.lastResult
         if ($last -and [string]$last.result -eq "オフライン") { $quality = Get-OfflineQualityLabel -Timestamp ([string]$last.timestamp) }
 
@@ -763,11 +1074,18 @@ function Get-TargetSummary {
             responseTimeMs = if ($last) { $last.responseTimeMs } else { $null }
             consecutiveFailures = [int]$state.consecutiveFailures
             consecutiveTimeouts = [int]$state.consecutiveTimeouts
+            measurementCount = [long]$state.measurementCount
             loss100Percent = $loss100
             loss600Percent = $loss600
+            loss3600Percent = $loss3600
+            loss21600Percent = $loss21600
             loss100SampleCount = $loss100SampleCount
             loss600SampleCount = $loss600SampleCount
+            loss3600SampleCount = $loss3600SampleCount
+            loss21600SampleCount = $loss21600SampleCount
             quality = $quality
+            quality3600 = $quality3600
+            quality21600 = $quality21600
             errorDetail = if ($last) { $last.errorDetail } else { "測定前です。" }
             timestamp = if ($last) { $last.timestamp } else { $null }
         })
@@ -786,6 +1104,8 @@ function Save-NetworkSummary {
     Ensure-RuntimeDirectory
     $summary = [ordered]@{
         updateTime = (Get-Date).ToString("o")
+        monitorStartedAt = $monitorStartedAt.ToString("o")
+        lastBootTime = ([datetime]$lastBootTime).ToString("o")
         online = -not $OfflineMode
         offlineMode = $OfflineMode
         linkStatus = $LinkStatus
@@ -801,49 +1121,6 @@ function Save-NetworkSummary {
     }
 
     Write-Utf8JsonFile -Path $networkSummaryPath -Value $summary
-}
-
-function Stop-OnlineDataFetchers {
-    $scriptNames = @(
-        "start_news_fetcher.ps1",
-        "fetch_news.ps1",
-        "fetch_bus.ps1",
-        "fetch_imazato_liner.ps1"
-    )
-    foreach ($scriptName in $scriptNames) {
-        Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" -ErrorAction SilentlyContinue |
-            Where-Object { $_.CommandLine -like "*$scriptName*" } |
-            ForEach-Object {
-                Invoke-CimMethod -InputObject $_ -MethodName Terminate -ErrorAction SilentlyContinue | Out-Null
-            }
-    }
-}
-
-function Clear-OnlineTempData {
-    if (-not (Test-Path -LiteralPath $tempPath -PathType Container)) { return }
-
-    Get-ChildItem -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue |
-        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-}
-
-function Start-OnlineDataFetchers {
-    Stop-OnlineDataFetchers
-
-    $newsLauncherPath = Join-Path $rootPath "bin\start_news_fetcher.ps1"
-    if (Test-Path -LiteralPath $newsLauncherPath -PathType Leaf) {
-        Start-Process powershell `
-            -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$newsLauncherPath`"" `
-            -WindowStyle Hidden
-    }
-
-    foreach ($scriptName in @("fetch_bus.ps1", "fetch_imazato_liner.ps1")) {
-        $scriptPath = Join-Path $appPath $scriptName
-        if (Test-Path -LiteralPath $scriptPath -PathType Leaf) {
-            Start-Process powershell `
-                -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$scriptPath`"" `
-                -WindowStyle Hidden
-        }
-    }
 }
 
 function Test-SystemOffline {
@@ -880,6 +1157,25 @@ $targetStates = @{
         -Address "google.com / 8.8.8.8" `
         -Kind "nslookup" `
         -DnsServer "8.8.8.8"
+    "tcp-google-443" = New-TargetState `
+        -Id "tcp-google-443" `
+        -Name "TCP通信（443）" `
+        -Address "www.google.com:443" `
+        -Kind "tcp" `
+        -HostName "www.google.com" `
+        -Port 443
+    "web-google" = New-TargetState `
+        -Id "web-google" `
+        -Name "Web通信（Google）" `
+        -Address "https://www.google.com" `
+        -Kind "web" `
+        -Uri "https://www.google.com"
+    "web-microsoft" = New-TargetState `
+        -Id "web-microsoft" `
+        -Name "Web通信（Microsoft）" `
+        -Address "https://www.microsoft.com" `
+        -Kind "web" `
+        -Uri "https://www.microsoft.com"
 }
 if (-not [string]::IsNullOrWhiteSpace($gatewayAddress)) {
     $targetStates.gateway = New-TargetState -Id "gateway" -Name "ローカルネットワーク（デフォルトゲートウェイ）" -Address $gatewayAddress
@@ -888,11 +1184,20 @@ if (-not [string]::IsNullOrWhiteSpace($gatewayAddress)) {
 Write-Host "Snow Link Drone - Network monitoring started..." -ForegroundColor Cyan
 
 $pendingMeasurements = New-Object System.Collections.ArrayList
-$measurementOrder = @("internet", "gateway", "dns-default", "dns-google")
+$measurementOrder = @(
+    "internet",
+    "gateway",
+    "dns-default",
+    "dns-google",
+    "tcp-google-443",
+    "web-google",
+    "web-microsoft"
+)
 $lastTargetLaunchTimes = @{}
 $previousLoopStartedAt = $null
 
 while ($true) {
+    try {
     if ($null -ne $previousLoopStartedAt) {
         Wait-UntilTimestamp -Timestamp $previousLoopStartedAt.AddMilliseconds($monitorIntervalMs)
     }
@@ -909,15 +1214,18 @@ while ($true) {
         }
     }
 
-    $latestGatewayAddress = Get-DefaultGatewayAddress
-    if (-not [string]::IsNullOrWhiteSpace($latestGatewayAddress)) {
-        if (-not $targetStates.ContainsKey("gateway")) {
-            $targetStates.gateway = New-TargetState `
-                -Id "gateway" `
-                -Name "ローカルネットワーク（デフォルトゲートウェイ）" `
-                -Address $latestGatewayAddress
+    if (($loopStartedAt - $lastGatewayRefreshAt).TotalSeconds -ge 30) {
+        $lastGatewayRefreshAt = $loopStartedAt
+        $latestGatewayAddress = Get-DefaultGatewayAddress
+        if (-not [string]::IsNullOrWhiteSpace($latestGatewayAddress)) {
+            if (-not $targetStates.ContainsKey("gateway")) {
+                $targetStates.gateway = New-TargetState `
+                    -Id "gateway" `
+                    -Name "ローカルネットワーク（デフォルトゲートウェイ）" `
+                    -Address $latestGatewayAddress
+            }
+            $targetStates.gateway.address = $latestGatewayAddress
         }
-        $targetStates.gateway.address = $latestGatewayAddress
     }
 
     $linkStatus = Get-NetworkLinkStatus
@@ -937,20 +1245,37 @@ while ($true) {
             }
             $measurementTimestamp = Get-Date
 
-            if ([string]$state.kind -eq "nslookup") {
-                $context = Start-NslookupMeasurement `
-                    -TargetId $targetId `
-                    -TargetName ([string]$state.name) `
-                    -QueryName "google.com" `
-                    -DnsServer ([string]$state.dnsServer) `
-                    -MeasurementTimestamp $measurementTimestamp
-            }
-            else {
-                $context = Start-PingMeasurement `
-                    -TargetId $targetId `
-                    -TargetName ([string]$state.name) `
-                    -Address ([string]$state.address) `
-                    -MeasurementTimestamp $measurementTimestamp
+            switch ([string]$state.kind) {
+                "nslookup" {
+                    $context = Start-NslookupMeasurement `
+                        -TargetId $targetId `
+                        -TargetName ([string]$state.name) `
+                        -QueryName "google.com" `
+                        -DnsServer ([string]$state.dnsServer) `
+                        -MeasurementTimestamp $measurementTimestamp
+                }
+                "tcp" {
+                    $context = Start-TcpMeasurement `
+                        -TargetId $targetId `
+                        -TargetName ([string]$state.name) `
+                        -HostName ([string]$state.hostName) `
+                        -Port ([int]$state.port) `
+                        -MeasurementTimestamp $measurementTimestamp
+                }
+                "web" {
+                    $context = Start-WebMeasurement `
+                        -TargetId $targetId `
+                        -TargetName ([string]$state.name) `
+                        -Uri ([string]$state.uri) `
+                        -MeasurementTimestamp $measurementTimestamp
+                }
+                default {
+                    $context = Start-PingMeasurement `
+                        -TargetId $targetId `
+                        -TargetName ([string]$state.name) `
+                        -Address ([string]$state.address) `
+                        -MeasurementTimestamp $measurementTimestamp
+                }
             }
             $lastTargetLaunchTimes[$targetId] = $measurementTimestamp
             [void]$pendingMeasurements.Add($context)
@@ -963,11 +1288,11 @@ while ($true) {
             $targetId = [string]$context.targetId
             if ($blockedTargetIds.ContainsKey($targetId)) { continue }
 
-            $measurement = if ([string]$context.kind -eq "nslookup") {
-                Complete-NslookupMeasurement -Context $context
-            }
-            else {
-                Complete-PingMeasurement -Context $context
+            $measurement = switch ([string]$context.kind) {
+                "nslookup" { Complete-NslookupMeasurement -Context $context; break }
+                "tcp" { Complete-TcpMeasurement -Context $context; break }
+                "web" { Complete-WebMeasurement -Context $context; break }
+                default { Complete-PingMeasurement -Context $context; break }
             }
             if ($null -eq $measurement) {
                 $blockedTargetIds[$targetId] = $true
@@ -1000,30 +1325,43 @@ while ($true) {
     foreach ($measurement in $orderedMeasurements) {
         Update-TargetState -TargetStates $targetStates -Measurement $measurement
     }
-    if ($orderedMeasurements.Count -gt 0) {
-        Add-NetworkSqliteMeasurements `
-            -SqliteExePath $sqliteExePath `
-            -DatabasePath $networkDbPath `
-            -Measurements $orderedMeasurements
-    }
-
     $offlineMode = Test-SystemOffline -LinkStatus $linkStatus
     if ($offlineMode) {
         $script:todayStats.totalOfflineSeconds = [int]$script:todayStats.totalOfflineSeconds + 1
     }
 
+    # DBが一時的にロックされても画面の最終更新時刻を止めないため、状態を先に公開する。
     Save-NetworkSummary -TargetStates $targetStates -OfflineMode $offlineMode -LinkStatus $linkStatus
+
+    if ($orderedMeasurements.Count -gt 0) {
+        try {
+            Add-NetworkSqliteMeasurements `
+                -SqliteExePath $sqliteExePath `
+                -DatabasePath $networkDbPath `
+                -Measurements $orderedMeasurements
+        }
+        catch {
+            Write-NetworkMonitorError -Message "SQLite書込み失敗: $($_.Exception.Message)`r`n$($_.ScriptStackTrace)"
+        }
+    }
+
     Trim-NetworkDatabase
 
     if ($offlineMode -and $isOnline -ne $false) {
-        Stop-OnlineDataFetchers
-        Clear-OnlineTempData
         $script:todayStats.offlineCount = [int]$script:todayStats.offlineCount + 1
         $isOnline = $false
     }
     elseif ((-not $offlineMode) -and $isOnline -ne $true) {
-        Start-OnlineDataFetchers
         $isOnline = $true
     }
 
+    $loopElapsedSeconds = ((Get-Date) - $loopStartedAt).TotalSeconds
+    if ($loopElapsedSeconds -ge 5) {
+        Write-NetworkMonitorError -Message ("監視ループ遅延: {0:N1}秒" -f $loopElapsedSeconds)
+    }
+    }
+    catch {
+        Write-NetworkMonitorError -Message "監視ループ継続可能エラー: $($_.Exception.GetBaseException().Message)`r`n$($_.ScriptStackTrace)"
+        Start-Sleep -Milliseconds $monitorIntervalMs
+    }
 }

@@ -229,6 +229,12 @@ while ($true) {
                 Select-Object -First 1
 
                 if ($weeklyWeatherArea -and $weeklyTemperatureArea) {
+                    $shortWeatherSeries = $jma[0].timeSeries |
+                    Where-Object { $_.areas | Where-Object { $_.weatherCodes } } |
+                    Select-Object -First 1
+                    $shortWeatherArea = $shortWeatherSeries.areas |
+                    Where-Object { $_.area.code -eq "270000" } |
+                    Select-Object -First 1
                     $shortTemperatureSeries = $jma[0].timeSeries |
                     Where-Object { $_.areas[0].temps } |
                     Select-Object -First 1
@@ -245,6 +251,28 @@ while ($true) {
                         $pop = [string]$weeklyWeatherArea.pops[$dayIndex]
                         $tempMin = [string]$weeklyTemperatureArea.tempsMin[$dayIndex]
                         $tempMax = [string]$weeklyTemperatureArea.tempsMax[$dayIndex]
+                        $weatherCode = [string]$weeklyWeatherArea.weatherCodes[$dayIndex]
+                        $weatherText = ""
+
+                        # 短期予報には週間予報より詳しい天気文があるため、同日の情報を優先する。
+                        if ($shortWeatherSeries -and $shortWeatherArea) {
+                            $shortWeatherTimes = @($shortWeatherSeries.timeDefines)
+                            $shortWeatherCodes = @($shortWeatherArea.weatherCodes)
+                            $shortWeatherTexts = @($shortWeatherArea.weathers)
+
+                            for ($weatherIndex = 0; $weatherIndex -lt $shortWeatherTimes.Count; $weatherIndex++) {
+                                $shortWeatherDate = [datetimeoffset]::Parse($shortWeatherTimes[$weatherIndex]).Date
+                                if ($shortWeatherDate -ne $targetDate) { continue }
+
+                                if (-not [string]::IsNullOrWhiteSpace([string]$shortWeatherCodes[$weatherIndex])) {
+                                    $weatherCode = [string]$shortWeatherCodes[$weatherIndex]
+                                }
+                                if (-not [string]::IsNullOrWhiteSpace([string]$shortWeatherTexts[$weatherIndex])) {
+                                    $weatherText = [string]$shortWeatherTexts[$weatherIndex]
+                                }
+                                break
+                            }
+                        }
 
                         if ([string]::IsNullOrWhiteSpace($pop) -and $popSeries) {
                             $shortPopsForDate = @()
@@ -286,7 +314,8 @@ while ($true) {
 
                         $weeklyDays += @{
                             date                     = $targetDate.ToString("yyyy-MM-dd")
-                            weatherCode              = [string]$weeklyWeatherArea.weatherCodes[$dayIndex]
+                            weatherCode              = $weatherCode
+                            weatherText              = $weatherText
                             precipitationProbability = if ([string]::IsNullOrWhiteSpace($pop)) { $null } else { [int]$pop }
                             temperatureMin           = if ([string]::IsNullOrWhiteSpace($tempMin)) { $null } else { [int]$tempMin }
                             temperatureMax           = if ([string]::IsNullOrWhiteSpace($tempMax)) { $null } else { [int]$tempMax }

@@ -1101,7 +1101,6 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
                 bus,
                 cycleSeconds,
             );
-            const isWaitingForOnlineInfo = !!timetableFallbackStatus;
             const startDepartureStatus = getBusStartDepartureStatus(
                 bus,
                 now,
@@ -1218,9 +1217,6 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
                 } else {
                     imgName = getBusTravelIconPath(bus, opDate, "walk_blue");
                 }
-            }
-            if (isWaitingForOnlineInfo) {
-                imgName = "";
             }
             if (
                 engMode == engVisible.bus_msg &&

@@ -22,6 +22,8 @@ $legacyNetworkJsonlPath = $networkSqlitePaths.LegacyJsonlPath
 $sqliteExePath = $networkSqlitePaths.SqliteExePath
 $networkSummaryPath = Join-Path $runtimeDbDir "network_status_summary.json"
 $networkHistoryErrorMessage = ""
+$networkDatabaseInitialized = $false
+$lastValidNetworkSummary = $null
 $timeSignalTriggerGraceSeconds = 20
 $newsFetcherLauncherPath = Join-Path $projectDir "bin\start_news_fetcher.ps1"
 
@@ -151,18 +153,17 @@ function Get-CurrentInformationDataJson {
 }
 
 function Start-NewsFetcherIfNeeded {
-    $powershellProcesses = @(
-        Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" -ErrorAction SilentlyContinue
-    )
-    $launcherProcess = $powershellProcesses |
-        Where-Object {
-            ([string]$_.CommandLine).IndexOf(
-                "start_news_fetcher.ps1",
-                [StringComparison]::OrdinalIgnoreCase
-            ) -ge 0
-        } |
-        Select-Object -First 1
-    if ($launcherProcess) {
+    $existingMutex = $null
+    try {
+        $existingMutex = [Threading.Mutex]::OpenExisting("Global\InfomationSystemNewsFetcher")
+    }
+    catch [Threading.WaitHandleCannotBeOpenedException] {
+        $existingMutex = $null
+    }
+    finally {
+        if ($null -ne $existingMutex) { $existingMutex.Dispose() }
+    }
+    if ($null -ne $existingMutex) {
         return @{ ok = $true; running = $true; started = $false }
     }
 
@@ -175,19 +176,7 @@ function Start-NewsFetcherIfNeeded {
         }
     }
 
-    # ランチャーを使わない旧プロセスは、同一ファイルへの二重書き込みを防ぐため停止する。
-    $powershellProcesses |
-        Where-Object {
-            $commandLine = [string]$_.CommandLine
-            $commandLine.IndexOf(
-                "fetch_news.ps1",
-                [StringComparison]::OrdinalIgnoreCase
-            ) -ge 0
-        } |
-        ForEach-Object {
-            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-        }
-
+    # ランチャー側の名前付きMutexが二重起動を防止する。
     Start-Process `
         -FilePath "powershell.exe" `
         -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$newsFetcherLauncherPath`"" `
@@ -238,9 +227,14 @@ function Read-NetworkSummary {
     }
 
     try {
-        return Get-Content -Raw -Encoding UTF8 -LiteralPath $networkSummaryPath | ConvertFrom-Json
+        $summary = Get-Content -Raw -Encoding UTF8 -LiteralPath $networkSummaryPath | ConvertFrom-Json
+        $script:lastValidNetworkSummary = $summary
+        return $summary
     }
     catch {
+        if ($null -ne $script:lastValidNetworkSummary) {
+            return $script:lastValidNetworkSummary
+        }
         return [ordered]@{
             updateTime = (Get-Date).ToString("o")
             online = $false
@@ -308,6 +302,21 @@ function ConvertTo-NetworkDateTime {
 
     return $null
 }
+
+function Initialize-NetworkHistoryDatabaseOnce {
+    if ($script:networkDatabaseInitialized) { return }
+
+    Initialize-NetworkSqliteDatabase `
+        -RuntimeDir $runtimeDbDir `
+        -DatabasePath $networkDbPath `
+        -SqliteExePath $sqliteExePath
+    Import-LegacyNetworkJsonlToSqlite `
+        -SqliteExePath $sqliteExePath `
+        -DatabasePath $networkDbPath `
+        -LegacyJsonlPath $legacyNetworkJsonlPath
+    $script:networkDatabaseInitialized = $true
+}
+
 function Read-NetworkHistory {
     param(
         [string]$TargetId,
@@ -323,14 +332,7 @@ function Read-NetworkHistory {
         New-Item -ItemType Directory -Force -Path $runtimeDbDir | Out-Null
     }
 
-    Initialize-NetworkSqliteDatabase `
-        -RuntimeDir $runtimeDbDir `
-        -DatabasePath $networkDbPath `
-        -SqliteExePath $sqliteExePath
-    Import-LegacyNetworkJsonlToSqlite `
-        -SqliteExePath $sqliteExePath `
-        -DatabasePath $networkDbPath `
-        -LegacyJsonlPath $legacyNetworkJsonlPath
+    Initialize-NetworkHistoryDatabaseOnce
 
     $safeLimit = [Math]::Min(50000, [Math]::Max(1, $Limit))
     $safeOffset = [Math]::Max(0, $Offset)
@@ -360,6 +362,14 @@ function Read-NetworkHistory {
 
 function Get-NetworkStatusJson {
     param([Uri]$Uri)
+
+    $summaryOnly = Get-QueryValue -Uri $Uri -Name "summaryOnly"
+    if ($summaryOnly -eq "1") {
+        return Get-JsonResponse ([ordered]@{
+            ok = $true
+            summary = Read-NetworkSummary
+        })
+    }
 
     $limitText = Get-QueryValue -Uri $Uri -Name "limit"
     $offsetText = Get-QueryValue -Uri $Uri -Name "offset"
@@ -394,9 +404,42 @@ function Get-NetworkStatusJson {
             $script:networkHistoryErrorMessage = $_.Exception.Message
         }
     }
+    $summary = Read-NetworkSummary
+    $measurementStart = ConvertTo-NetworkDateTime -Value ([string]$summary.monitorStartedAt)
+    if (-not $measurementStart) {
+        $measurementStart = ConvertTo-NetworkDateTime -Value ([string]$summary.lastBootTime)
+    }
+    if ($measurementStart) {
+        try {
+            $measurementCounts = Read-NetworkSqliteMeasurementCountsSince `
+                -SqliteExePath $sqliteExePath `
+                -DatabasePath $networkDbPath `
+                -StartDate $measurementStart
+            foreach ($target in @($summary.targets)) {
+                $targetId = [string]$target.id
+                $measurementCount = if ($measurementCounts.ContainsKey($targetId)) {
+                    [long]$measurementCounts[$targetId]
+                }
+                else {
+                    0L
+                }
+                if ($target.PSObject.Properties.Name -contains "measurementCount") {
+                    $target.measurementCount = $measurementCount
+                }
+                else {
+                    $target | Add-Member -NotePropertyName "measurementCount" -NotePropertyValue $measurementCount
+                }
+            }
+        }
+        catch {
+            if ([string]::IsNullOrWhiteSpace($script:networkHistoryErrorMessage)) {
+                $script:networkHistoryErrorMessage = $_.Exception.Message
+            }
+        }
+    }
     return Get-JsonResponse ([ordered]@{
         ok = $true
-        summary = Read-NetworkSummary
+        summary = $summary
         history = @($historyRows)
         hasMore = ($historyRows.Count -ge $limit)
         historyError = $script:networkHistoryErrorMessage

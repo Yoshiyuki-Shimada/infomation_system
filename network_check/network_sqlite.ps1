@@ -63,11 +63,18 @@ function Invoke-NetworkSqliteCommand {
     )
 
     Assert-NetworkSqliteTool -SqliteExePath $SqliteExePath
-    $output = & $SqliteExePath $DatabasePath $Sql 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw (($output | Out-String).Trim())
+    $maximumAttempts = 3
+    for ($attempt = 1; $attempt -le $maximumAttempts; $attempt++) {
+        $output = & $SqliteExePath $DatabasePath $Sql 2>&1
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -eq 0) { return $output }
+
+        $message = (($output | Out-String).Trim())
+        if ($message -notmatch "database is locked|database table is locked" -or $attempt -eq $maximumAttempts) {
+            throw $message
+        }
+        Start-Sleep -Milliseconds 150
     }
-    return $output
 }
 
 function Invoke-NetworkSqliteJsonQuery {
@@ -78,9 +85,18 @@ function Invoke-NetworkSqliteJsonQuery {
     )
 
     Assert-NetworkSqliteTool -SqliteExePath $SqliteExePath
-    $output = & $SqliteExePath -json $DatabasePath $Sql 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw (($output | Out-String).Trim())
+    $output = $null
+    $maximumAttempts = 3
+    for ($attempt = 1; $attempt -le $maximumAttempts; $attempt++) {
+        $output = & $SqliteExePath -json $DatabasePath $Sql 2>&1
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -eq 0) { break }
+
+        $message = (($output | Out-String).Trim())
+        if ($message -notmatch "database is locked|database table is locked" -or $attempt -eq $maximumAttempts) {
+            throw $message
+        }
+        Start-Sleep -Milliseconds 150
     }
     $json = (($output | Out-String).Trim())
     if ([string]::IsNullOrWhiteSpace($json)) { return @() }
@@ -135,8 +151,12 @@ CREATE TABLE IF NOT EXISTS network_measurements (
     consecutive_failures INTEGER NOT NULL DEFAULT 0,
     loss100_percent REAL NOT NULL DEFAULT 0,
     loss600_percent REAL NOT NULL DEFAULT 0,
+    loss3600_percent REAL NOT NULL DEFAULT 0,
+    loss21600_percent REAL NOT NULL DEFAULT 0,
     loss100_sample_count INTEGER,
     loss600_sample_count INTEGER,
+    loss3600_sample_count INTEGER,
+    loss21600_sample_count INTEGER,
     quality TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -148,6 +168,10 @@ CREATE INDEX IF NOT EXISTS idx_network_measurements_timestamp
     Invoke-NetworkSqliteCommand -SqliteExePath $SqliteExePath -DatabasePath $DatabasePath -Sql $schemaSql | Out-Null
     Add-NetworkSqliteColumnIfMissing -SqliteExePath $SqliteExePath -DatabasePath $DatabasePath -ColumnName "loss100_sample_count" -ColumnDefinition "INTEGER"
     Add-NetworkSqliteColumnIfMissing -SqliteExePath $SqliteExePath -DatabasePath $DatabasePath -ColumnName "loss600_sample_count" -ColumnDefinition "INTEGER"
+    Add-NetworkSqliteColumnIfMissing -SqliteExePath $SqliteExePath -DatabasePath $DatabasePath -ColumnName "loss3600_percent" -ColumnDefinition "REAL NOT NULL DEFAULT 0"
+    Add-NetworkSqliteColumnIfMissing -SqliteExePath $SqliteExePath -DatabasePath $DatabasePath -ColumnName "loss21600_percent" -ColumnDefinition "REAL NOT NULL DEFAULT 0"
+    Add-NetworkSqliteColumnIfMissing -SqliteExePath $SqliteExePath -DatabasePath $DatabasePath -ColumnName "loss3600_sample_count" -ColumnDefinition "INTEGER"
+    Add-NetworkSqliteColumnIfMissing -SqliteExePath $SqliteExePath -DatabasePath $DatabasePath -ColumnName "loss21600_sample_count" -ColumnDefinition "INTEGER"
 }
 
 function Get-NetworkSqliteCount {
@@ -171,6 +195,40 @@ function Get-NetworkSqliteCount {
     }
 }
 
+function Read-NetworkSqliteMeasurementCountsSince {
+    param(
+        [string]$SqliteExePath,
+        [string]$DatabasePath,
+        [datetime]$StartDate
+    )
+
+    $counts = @{}
+    if (-not (Test-Path -LiteralPath $DatabasePath -PathType Leaf)) { return $counts }
+
+    # オフライン判定はパケットロス率へ含めないため、累計検証回数からも除外します。
+    $startText = $StartDate.ToString("yyyy-MM-ddTHH:mm:ss")
+    $sql = @"
+SELECT
+    target_id AS targetId,
+    COUNT(*) AS measurementCount
+FROM network_measurements
+WHERE result <> 'オフライン'
+  AND substr(timestamp, 1, 19) >= $(ConvertTo-NetworkSqliteTextLiteral $startText)
+GROUP BY target_id;
+"@
+    $rows = @(Invoke-NetworkSqliteJsonQuery `
+        -SqliteExePath $SqliteExePath `
+        -DatabasePath $DatabasePath `
+        -Sql $sql)
+    foreach ($row in $rows) {
+        $targetId = [string]$row.targetId
+        if (-not [string]::IsNullOrWhiteSpace($targetId)) {
+            $counts[$targetId] = [long]$row.measurementCount
+        }
+    }
+    return $counts
+}
+
 function New-NetworkMeasurementInsertSql {
     param([object]$Measurement)
 
@@ -185,8 +243,12 @@ function New-NetworkMeasurementInsertSql {
     $consecutiveFailures = ConvertTo-NetworkSqliteIntegerLiteral $Measurement.consecutiveFailures
     $loss100 = ConvertTo-NetworkSqliteRealLiteral $Measurement.loss100Percent
     $loss600 = ConvertTo-NetworkSqliteRealLiteral $Measurement.loss600Percent
+    $loss3600 = ConvertTo-NetworkSqliteRealLiteral $Measurement.loss3600Percent
+    $loss21600 = ConvertTo-NetworkSqliteRealLiteral $Measurement.loss21600Percent
     $loss100SampleCount = ConvertTo-NetworkSqliteIntegerLiteral $Measurement.loss100SampleCount
     $loss600SampleCount = ConvertTo-NetworkSqliteIntegerLiteral $Measurement.loss600SampleCount
+    $loss3600SampleCount = ConvertTo-NetworkSqliteIntegerLiteral $Measurement.loss3600SampleCount
+    $loss21600SampleCount = ConvertTo-NetworkSqliteIntegerLiteral $Measurement.loss21600SampleCount
     $quality = ConvertTo-NetworkSqliteTextLiteral $Measurement.quality
 
     return @"
@@ -202,8 +264,12 @@ INSERT INTO network_measurements (
     consecutive_failures,
     loss100_percent,
     loss600_percent,
+    loss3600_percent,
+    loss21600_percent,
     loss100_sample_count,
     loss600_sample_count,
+    loss3600_sample_count,
+    loss21600_sample_count,
     quality
 ) VALUES (
     $timestamp,
@@ -217,8 +283,12 @@ INSERT INTO network_measurements (
     $consecutiveFailures,
     $loss100,
     $loss600,
+    $loss3600,
+    $loss21600,
     $loss100SampleCount,
     $loss600SampleCount,
+    $loss3600SampleCount,
+    $loss21600SampleCount,
     $quality
 );
 "@
@@ -234,10 +304,20 @@ function Add-NetworkSqliteMeasurements {
     if (-not $Measurements -or $Measurements.Count -eq 0) { return }
 
     $sqlParts = New-Object System.Collections.ArrayList
-    [void]$sqlParts.Add("PRAGMA busy_timeout=3000;")
+    [void]$sqlParts.Add("PRAGMA busy_timeout=500;")
     [void]$sqlParts.Add("BEGIN IMMEDIATE;")
     foreach ($measurement in @($Measurements)) {
-        [void]$sqlParts.Add((New-NetworkMeasurementInsertSql -Measurement $measurement))
+        try {
+            [void]$sqlParts.Add((New-NetworkMeasurementInsertSql -Measurement $measurement))
+        }
+        catch {
+            $measurementType = if ($null -eq $measurement) { "null" } else { $measurement.GetType().FullName }
+            $failureValue = @($measurement.consecutiveFailures)
+            $failureTypes = @($failureValue | ForEach-Object {
+                if ($null -eq $_) { "null" } else { $_.GetType().FullName }
+            }) -join ","
+            throw "測定値SQL変換失敗 target=$($measurement.targetId), measurementType=$measurementType, consecutiveFailuresCount=$($failureValue.Count), consecutiveFailuresTypes=$failureTypes : $($_.Exception.Message)"
+        }
     }
     [void]$sqlParts.Add("COMMIT;")
 
@@ -398,8 +478,12 @@ SELECT
     consecutive_failures AS consecutiveFailures,
     loss100_percent AS loss100Percent,
     loss600_percent AS loss600Percent,
+    loss3600_percent AS loss3600Percent,
+    loss21600_percent AS loss21600Percent,
     loss100_sample_count AS loss100SampleCount,
     loss600_sample_count AS loss600SampleCount,
+    loss3600_sample_count AS loss3600SampleCount,
+    loss21600_sample_count AS loss21600SampleCount,
     quality AS quality
 FROM network_measurements
 $whereSql

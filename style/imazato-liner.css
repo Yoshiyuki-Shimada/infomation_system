@@ -1502,3 +1502,251 @@
     background: #303744;
     color: #9ca3af;
 }
+
+/* 通信状況ダッシュボード：対象メニュー・状態図・運用情報の3カラム構成。 */
+.network-dashboard-layout {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(250px, 0.86fr) minmax(410px, 1.48fr) minmax(300px, 1fr);
+    border: 2px solid var(--snow-white);
+    overflow: hidden;
+}
+
+.network-target-menu {
+    min-width: 0;
+    overflow-y: auto;
+    border-right: 2px solid var(--snow-white);
+}
+
+.network-target-menu-item {
+    position: relative;
+    display: grid;
+    grid-template-columns: 58px minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 68px;
+    padding: 7px 10px;
+    border: 0;
+    border-bottom: 1px solid var(--snow-white);
+    background: transparent;
+    color: var(--snow-white);
+    text-align: left;
+    touch-action: manipulation;
+}
+
+.network-target-menu-item.is-active::before {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 12px;
+    background: linear-gradient(90deg, #fff8a9 0%, #ffe100 52%, rgba(255, 225, 0, 0) 100%);
+    content: "";
+}
+
+.network-target-menu-item img {
+    width: 50px;
+    height: 50px;
+    object-fit: contain;
+}
+
+.network-target-menu-item strong,
+.network-target-menu-item small {
+    display: block;
+    letter-spacing: 0;
+}
+
+.network-target-menu-item strong {
+    font-size: 1rem;
+    line-height: 1.15;
+}
+
+.network-target-menu-item small {
+    margin-top: 2px;
+    font-size: 0.82rem;
+}
+
+.network-selected-panel,
+.network-operations-panel {
+    min-width: 0;
+    min-height: 0;
+    padding: 8px 12px;
+    overflow-y: auto;
+}
+
+.network-selected-panel {
+    display: flex;
+    flex-direction: column;
+    border-right: 2px solid var(--snow-white);
+}
+
+.network-selected-panel h3 {
+    margin: 0;
+    min-height: 26px;
+    font-size: 1.05rem;
+}
+
+.network-path-visual {
+    display: grid;
+    grid-template-columns: 84px minmax(100px, 1fr) 84px;
+    align-items: center;
+    gap: 8px;
+    min-height: 98px;
+    margin-top: 3px;
+}
+
+.network-endpoint-image {
+    width: 78px;
+    height: 78px;
+    object-fit: contain;
+}
+
+.network-path-line {
+    position: relative;
+    height: 3px;
+    border-top: 3px dotted var(--snow-white);
+}
+
+.network-path-line img {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 64px;
+    height: 64px;
+    transform: translate(-50%, -50%);
+    object-fit: contain;
+}
+
+.network-selected-status {
+    margin: -2px 0 4px;
+    font-size: 1rem;
+    font-weight: 900;
+    text-align: center;
+}
+
+.network-target-menu-item .is-normal,
+.network-selected-status.is-normal,
+.network-loss-row .is-normal {
+    color: #38d5ff;
+}
+
+.network-target-menu-item .is-warning,
+.network-selected-status.is-warning,
+.network-loss-row .is-warning {
+    color: #ee7b1a;
+}
+
+.network-target-menu-item .is-measuring,
+.network-selected-status.is-measuring,
+.network-loss-row .is-measuring {
+    color: #019a66;
+}
+
+.network-target-menu-item .is-offline,
+.network-selected-status.is-offline {
+    color: #e02135;
+}
+
+.network-target-menu-item .is-history,
+.network-selected-status.is-history {
+    color: #ffe766;
+}
+
+.network-selected-address {
+    padding: 0 12px 4px;
+    font-size: 0.95rem;
+}
+
+.network-selected-metrics {
+    margin-bottom: 2px;
+}
+
+.network-loss-list {
+    display: grid;
+    gap: 3px;
+    margin-bottom: 8px;
+}
+
+.network-loss-row {
+    display: grid;
+    grid-template-columns: 42px 82px 64px minmax(110px, 1fr);
+    align-items: center;
+    gap: 6px;
+    min-height: 24px;
+    font-size: 0.9rem;
+}
+
+.network-loss-row > span:nth-child(3) {
+    text-align: right;
+}
+
+.network-loss-row b {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+}
+
+.network-loss-row img {
+    width: 20px;
+    height: 20px;
+    object-fit: contain;
+}
+
+.network-selected-panel > .network-card-detail,
+.network-operations-panel > .network-card-detail {
+    align-self: flex-end;
+    margin-top: auto;
+}
+
+.network-operations-panel .network-data-update-item {
+    margin: 0 0 10px 12px;
+}
+
+.network-operations-panel .network-summary-metrics {
+    margin: 0 0 8px 12px;
+    font-size: 0.88rem;
+}
+
+.network-summary-error-box {
+    min-height: 54px;
+    max-height: 92px;
+    margin: 0 0 6px 12px;
+    padding: 8px;
+    overflow: auto;
+    background: #000;
+    color: var(--snow-white);
+    font-size: 0.82rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.network-detail-tabs {
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+@media (max-width: 1280px) {
+    .network-dashboard-layout {
+        grid-template-columns: minmax(235px, 0.85fr) minmax(380px, 1.45fr) minmax(280px, 1fr);
+    }
+
+    .network-target-menu-item {
+        grid-template-columns: 48px minmax(0, 1fr);
+        min-height: 64px;
+        padding: 6px 8px;
+    }
+
+    .network-target-menu-item img {
+        width: 42px;
+        height: 42px;
+    }
+
+    .network-loss-row {
+        grid-template-columns: 38px 74px 56px minmax(100px, 1fr);
+        font-size: 0.82rem;
+    }
+
+    .network-detail-tabs {
+        grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    }
+}

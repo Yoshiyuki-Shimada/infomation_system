@@ -704,32 +704,217 @@ function createWeatherDataHtmlNow(
     `;
 }
 
+// 気象庁の天気コードを、表示名とローカル画像へ一元的に対応付ける。
+const jmaWeatherNames = {
+    100: "晴れ",
+    101: "晴れ時々曇り",
+    102: "晴れ一時雨",
+    103: "晴れ時々雨",
+    104: "晴れ一時雪",
+    105: "晴れ時々雪",
+    110: "晴れ後時々曇り",
+    111: "晴れ後曇り",
+    112: "晴れ後一時雨",
+    113: "晴れ後時々雨",
+    114: "晴れ後雨",
+    115: "晴れ後一時雪",
+    116: "晴れ後時々雪",
+    117: "晴れ後雪",
+    200: "曇り",
+    201: "曇り時々晴れ",
+    202: "曇り一時雨",
+    203: "曇り時々雨",
+    204: "曇り一時雪",
+    205: "曇り時々雪",
+    210: "曇り後時々晴れ",
+    211: "曇り後晴れ",
+    212: "曇り後一時雨",
+    213: "曇り後時々雨",
+    214: "曇り後雨",
+    215: "曇り後一時雪",
+    216: "曇り後時々雪",
+    217: "曇り後雪",
+    300: "雨",
+    301: "雨時々晴れ",
+    302: "雨時々止む",
+    303: "雨時々雪",
+    304: "雨か雪",
+    306: "大雨",
+    307: "風雨が強い",
+    308: "雨で暴風を伴う",
+    309: "雨一時雪",
+    311: "雨後晴れ",
+    313: "雨後曇り",
+    314: "雨後雪",
+    315: "雨後時々雪",
+    316: "雨か雪後晴れ",
+    317: "雨か雪後曇り",
+    328: "雨一時強く降る",
+    329: "雨一時みぞれ",
+    340: "雪か雨",
+    350: "雨で雷を伴う",
+    400: "雪",
+    401: "雪時々晴れ",
+    402: "雪時々止む",
+    403: "雪時々雨",
+    406: "風雪が強い",
+    407: "暴風雪",
+    409: "雪一時雨",
+    411: "雪後晴れ",
+    413: "雪後曇り",
+    414: "雪後雨",
+    415: "雪後時々雨",
+    416: "雪か雨後晴れ",
+    361: "雪か雨後晴れ",
+    371: "雪か雨後曇り",
+    405: "大雪",
+};
+
+const jmaWeatherIconNames = {
+    100: "clear-day",
+    101: "sunny-sometimes-cloudy",
+    102: "sunny-sometimes-rain",
+    103: "sunny-sometimes-rain",
+    104: "sunny-sometimes-snow",
+    105: "sunny-sometimes-snow",
+    110: "sunny-then-cloudy",
+    111: "sunny-then-cloudy",
+    112: "sunny-then-rain",
+    113: "sunny-then-rain",
+    114: "sunny-then-rain",
+    115: "sunny-then-snow",
+    116: "sunny-then-snow",
+    117: "sunny-then-snow",
+    200: "cloudy",
+    201: "cloudy-sometimes-sunny",
+    202: "cloudy-sometimes-rain",
+    203: "cloudy-sometimes-rain",
+    204: "cloudy-sometimes-snow",
+    205: "cloudy-sometimes-snow",
+    210: "cloudy-then-sunny",
+    211: "cloudy-then-sunny",
+    212: "cloudy-then-rain",
+    213: "cloudy-then-rain",
+    214: "cloudy-then-rain",
+    215: "cloudy-then-snow",
+    216: "cloudy-then-snow",
+    217: "cloudy-then-snow",
+    300: "rain",
+    301: "rain-sometimes-sunny",
+    302: "rain-intermittent",
+    303: "rain-sometimes-snow",
+    304: "sleet",
+    306: "heavy-rain",
+    307: "wind-rain",
+    308: "wind-rain",
+    309: "rain-sometimes-snow",
+    311: "rain-then-sunny",
+    313: "rain-then-cloudy",
+    314: "rain-then-snow",
+    315: "rain-then-snow",
+    316: "sleet",
+    317: "sleet",
+    328: "heavy-rain",
+    329: "sleet",
+    340: "sleet",
+    350: "thunderstorm",
+    400: "snow",
+    401: "snow-sometimes-sunny",
+    402: "snow-intermittent",
+    403: "snow-sometimes-rain",
+    406: "blowing-snow",
+    407: "blowing-snow",
+    409: "snow-sometimes-rain",
+    411: "snow-then-sunny",
+    413: "snow-then-cloudy",
+    414: "snow-then-rain",
+    415: "snow-then-rain",
+    416: "sleet",
+    361: "sleet",
+    371: "sleet",
+    405: "snow",
+};
+
+function normalizeJmaWeatherText(weatherText) {
+    return String(weatherText ?? "").replace(/[\s　]+/g, "");
+}
+
+function getJmaRainIntensity(weatherText) {
+    const normalizedText = normalizeJmaWeatherText(weatherText);
+
+    if (/霧雨/.test(normalizedText)) return "drizzle";
+    if (/小雨/.test(normalizedText)) return "light-rain";
+    if (/大雨|激しい雨|非常に激しい雨|猛烈な雨|強く降る/.test(normalizedText)) {
+        return "heavy-rain";
+    }
+
+    return "";
+}
+
+function getJmaWeatherIconName(code, weatherText) {
+    const baseIconName = jmaWeatherIconNames[code];
+    const rainIntensity = getJmaRainIntensity(weatherText);
+    if (!rainIntensity) return baseIconName;
+
+    const intensityIcons = {
+        rain: rainIntensity,
+        "heavy-rain": rainIntensity,
+        "sunny-sometimes-rain": `sunny-sometimes-${rainIntensity}`,
+        "sunny-then-rain": `sunny-then-${rainIntensity}`,
+        "cloudy-sometimes-rain": `cloudy-sometimes-${rainIntensity}`,
+        "cloudy-then-rain": `cloudy-then-${rainIntensity}`,
+    };
+
+    return intensityIcons[baseIconName] || baseIconName || rainIntensity;
+}
+
+function getJmaWeatherName(code, weatherText = "") {
+    const detailedName = normalizeJmaWeatherText(weatherText);
+    if (detailedName) return detailedName;
+    if (jmaWeatherNames[code]) return jmaWeatherNames[code];
+    if (code >= 100 && code < 200) return "晴れ";
+    if (code >= 200 && code < 300) return "曇り";
+    if (code >= 300 && code < 400) return "雨";
+    if (code >= 400 && code < 500) return "雪";
+    return "情報なし";
+}
+
+function getJmaWeatherIconPath(code, weatherText = "") {
+    let iconName = getJmaWeatherIconName(code, weatherText);
+
+    if (!iconName && code >= 100 && code < 200) iconName = "clear-day";
+    if (!iconName && code >= 200 && code < 300) iconName = "cloudy";
+    if (!iconName && code >= 300 && code < 400) iconName = "rain";
+    if (!iconName && code >= 400 && code < 500) iconName = "snow";
+
+    return `img/weather/${iconName || "unknown"}.png`;
+}
+
 /**
- * 明日の天気予報のHTMLを生成
- * @param {*} getGoogleWeatherIcon
- * @param {*} tomorrowCode
- * @param {*} wMap
- * @param {*} w
+ * 気象庁APIによる明日の天気予報HTMLを生成する。
+ * @param {*} forecast 気象庁の明日予報
  * @returns 生成後のHTML
  */
-function createWeatherDataHtmlTomorrow(
-    getGoogleWeatherIcon,
-    tomorrowCode,
-    wMap,
-    w,
-) {
+function createWeatherDataHtmlTomorrow(forecast) {
+    const tomorrowCode = Number(forecast.weatherCode);
     const tomorrowPrecipitationProbability =
-        w.daily.precipitation_probability_max?.[1];
+        forecast.precipitationProbability;
     const precipitationText =
         tomorrowPrecipitationProbability == null
             ? "--"
             : `${Math.round(tomorrowPrecipitationProbability)}%`;
-    const tomorrowMaxTemperature = Math.round(
-        w.daily.temperature_2m_max[1],
-    );
-    const tomorrowMinTemperature = Math.round(
-        w.daily.temperature_2m_min[1],
-    );
+    const maximumTemperature = Number(forecast.temperatureMax);
+    const minimumTemperature = Number(forecast.temperatureMin);
+    const tomorrowMaxTemperature = Number.isFinite(maximumTemperature)
+        ? Math.round(maximumTemperature)
+        : null;
+    const tomorrowMinTemperature = Number.isFinite(minimumTemperature)
+        ? Math.round(minimumTemperature)
+        : null;
+    const maximumTemperatureText =
+        tomorrowMaxTemperature == null ? "--" : tomorrowMaxTemperature;
+    const minimumTemperatureText =
+        tomorrowMinTemperature == null ? "--" : tomorrowMinTemperature;
     const temperatureLabels = createTemperatureDayLabelsHtml(
         tomorrowMaxTemperature,
         tomorrowMinTemperature,
@@ -738,18 +923,18 @@ function createWeatherDataHtmlTomorrow(
 
     return `
         <div class="slide">
-            <div class="slide-title">明日の天気</div>
+            <div class="slide-title">明日の天気（大阪府・気象庁）</div>
             <div class="slide-content">
                 <div class="weather_tomorrow">
-                    <img src="${getGoogleWeatherIcon(tomorrowCode, 1)}" class="weather_icon_tomorrow"><br>
-                    <span class="weather_name_tomorrow">${wMap[tomorrowCode] || "情報なし"}</span><br>
+                    <img src="${getJmaWeatherIconPath(tomorrowCode, forecast.weatherText)}" class="weather_icon_tomorrow"><br>
+                    <span class="weather_name_tomorrow">${getJmaWeatherName(tomorrowCode, forecast.weatherText)}</span><br>
                     <span class="weather_temperature_tomorrow">
                         <span class="weather_temperature_max_tomorrow">
-                            ${tomorrowMaxTemperature}℃
+                            ${maximumTemperatureText}℃
                         </span>
                         <span class="weather_slash_tomorrow">/</span>
                         <span class="weather_temperature_min_tomorrow">
-                            ${tomorrowMinTemperature}℃
+                            ${minimumTemperatureText}℃
                         </span>
                     </span>
                     <span class="weather_precipitation_tomorrow">
@@ -810,94 +995,13 @@ function createTemperatureDayLabelsHtml(
  */
 function createWeeklyWeatherHtml(weeklyWeather) {
     const weekdays = ["日", "月", "火", "水", "木", "金", "土"];
-    const weatherNames = {
-        100: "晴れ",
-        101: "晴れ時々曇り",
-        102: "晴れ一時雨",
-        103: "晴れ時々雨",
-        104: "晴れ一時雪",
-        105: "晴れ時々雪",
-        110: "晴れ後時々曇り",
-        111: "晴れ後曇り",
-        112: "晴れ後一時雨",
-        113: "晴れ後時々雨",
-        114: "晴れ後雨",
-        115: "晴れ後一時雪",
-        116: "晴れ後時々雪",
-        117: "晴れ後雪",
-        200: "曇り",
-        201: "曇り時々晴れ",
-        202: "曇り一時雨",
-        203: "曇り時々雨",
-        204: "曇り一時雪",
-        205: "曇り時々雪",
-        210: "曇り後時々晴れ",
-        211: "曇り後晴れ",
-        212: "曇り後一時雨",
-        213: "曇り後時々雨",
-        214: "曇り後雨",
-        215: "曇り後一時雪",
-        216: "曇り後時々雪",
-        217: "曇り後雪",
-        300: "雨",
-        301: "雨時々晴れ",
-        302: "雨時々止む",
-        303: "雨時々雪",
-        308: "雨で暴風を伴う",
-        311: "雨後晴れ",
-        313: "雨後曇り",
-        314: "雨後雪",
-        400: "雪",
-        401: "雪時々晴れ",
-        402: "雪時々止む",
-        403: "雪時々雨",
-        406: "風雪が強い",
-        411: "雪後晴れ",
-        413: "雪後曇り",
-        414: "雪後雨",
-    };
-    const getFallbackWeatherName = (code) => {
-        if (code >= 100 && code < 200) return "晴れ";
-        if (code >= 200 && code < 300) return "曇り";
-        if (code >= 300 && code < 400) return "雨";
-        if (code >= 400 && code < 500) return "雪";
-        return "情報なし";
-    };
-    const getJmaWeeklyWeatherIconCode = (code) => {
-        const exactIconCodes = new Set([
-            100, 101, 102, 104, 105, 110, 111, 112, 115, 200, 201, 202,
-            204, 205, 210, 211, 212, 215, 300, 301, 302, 303, 308, 311,
-            313, 314, 400, 401, 402, 403, 406, 411, 413, 414,
-        ]);
-        if (exactIconCodes.has(code)) return code;
-
-        const fallbackIconCodes = {};
-        fallbackIconCodes[103] = 102;
-        fallbackIconCodes[113] = 112;
-        fallbackIconCodes[114] = 112;
-        fallbackIconCodes[116] = 115;
-        fallbackIconCodes[117] = 115;
-        fallbackIconCodes[203] = 202;
-        fallbackIconCodes[213] = 212;
-        fallbackIconCodes[214] = 212;
-        fallbackIconCodes[216] = 215;
-        fallbackIconCodes[217] = 215;
-        if (fallbackIconCodes[code]) return fallbackIconCodes[code];
-
-        if (code >= 100 && code < 200) return 100;
-        if (code >= 200 && code < 300) return 200;
-        if (code >= 300 && code < 400) return 300;
-        if (code >= 400 && code < 500) return 400;
-        return 200;
-    };
 
     const items = weeklyWeather.days
         .map((forecast) => {
             const date = new Date(`${forecast.date}T00:00:00`);
             const code = Number(forecast.weatherCode);
             const dateText = `${date.getMonth() + 1}/${date.getDate()}（${weekdays[date.getDay()]}）`;
-            const weatherName =
-                weatherNames[code] || getFallbackWeatherName(code);
+            const weatherName = getJmaWeatherName(code, forecast.weatherText);
             const maxTemperature =
                 forecast.temperatureMax == null
                     ? "--"
@@ -920,7 +1024,7 @@ function createWeeklyWeatherHtml(weeklyWeather) {
                 <div class="weather_weekly_item">
                     <div class="weather_weekly_date">${dateText}</div>
                     <img
-                        src="https://www.jma.go.jp/bosai/forecast/img/${getJmaWeeklyWeatherIconCode(code)}.svg"
+                        src="${getJmaWeatherIconPath(code, forecast.weatherText)}"
                         class="weather_weekly_icon"
                         alt="${weatherName}"
                     >

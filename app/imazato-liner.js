@@ -691,8 +691,6 @@ function getImazatoLinerCharacterPresentation(
     if (bus.suspensionFlg) {
         return { src: "img/suspension.png", status: null, isStatusIcon: true };
     }
-    if (getImazatoLinerTimetableFallbackStatus(bus)) return null;
-
     const scheduledIconThresholdSeconds = 10 * 60;
     const predictedTimeThresholdSeconds = 13 * 60;
     const forecastTime = bus.predictedTime || bus.delayEstimateTime;
@@ -726,9 +724,8 @@ function getImazatoLinerCharacterPresentation(
         return { src: "img/infomation.png", status: null, isStatusIcon: true };
     }
 
-    // 残り時間表示と同じ時刻を使い、文字色とキャラクターの状態を一致させる。
-    const displayTime = getImazatoLinerDisplayBaseTime(bus, now);
-    const displaySeconds = getSecondsUntilImazatoLiner(displayTime, now);
+    // 残り時間は定刻基準のため、キャラクターも同じ定刻で判定する。
+    const displaySeconds = getSecondsUntilImazatoLiner(bus.time, now);
     const status = getImazatoLinerTravelStatus(displaySeconds);
     if (!status) return null;
 
@@ -976,8 +973,8 @@ function getImazatoLinerRemainingColor(secondsUntilDeparture) {
 }
 
 function getImazatoLinerRemainingInfo(bus, now = new Date()) {
-    const displayTime = getImazatoLinerDisplayBaseTime(bus, now);
-    const secondsUntilDeparture = getSecondsUntilImazatoLiner(displayTime, now);
+    // 遅延予測は運行情報として扱い、残り時間自体は表示中の定刻から算出する。
+    const secondsUntilDeparture = getSecondsUntilImazatoLiner(bus.time, now);
 
     if (secondsUntilDeparture < 0 || secondsUntilDeparture > 3540) {
         return null;

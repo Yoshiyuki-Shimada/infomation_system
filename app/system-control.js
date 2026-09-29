@@ -9,6 +9,15 @@
 
     const restartAutoCloseMs = 60000;
     const defaultHistoryLimit = 500;
+    const networkTargetDefinitions = [
+        { id: "internet", name: "インターネット", address: "8.8.8.8" },
+        { id: "gateway", name: "ローカルネットワーク（デフォルトゲートウェイ）", address: "-" },
+        { id: "dns-default", name: "DNS名前解決（システム既定）", address: "google.com" },
+        { id: "dns-google", name: "DNS名前解決（Google DNS）", address: "google.com / 8.8.8.8" },
+        { id: "tcp-google-443", name: "TCP通信（443）", address: "www.google.com:443" },
+        { id: "web-google", name: "Web通信（Google）", address: "https://www.google.com" },
+        { id: "web-microsoft", name: "Web通信（Microsoft）", address: "https://www.microsoft.com" },
+    ];
     let dashboardRefreshTimer = null;
     let restartAutoCloseTimer = null;
     const dashboardState = {
@@ -37,6 +46,7 @@
         loading: false,
         errorMessage: "",
         selectedRecord: null,
+        dashboardErrorDetailOpen: false,
     };
 
     function escapeHtml(value) {
@@ -83,7 +93,24 @@
 
     function getUniqueTargets(summary = dashboardState.summary) {
         const seenIds = new Set();
-        const targets = Array.isArray(summary?.targets) ? summary.targets : [];
+        const summaryTargets = Array.isArray(summary?.targets) ? summary.targets : [];
+        const summaryById = new Map();
+
+        summaryTargets.forEach((target) => {
+            const targetId = String(target?.id || "");
+            if (targetId && !summaryById.has(targetId)) summaryById.set(targetId, target);
+        });
+
+        const targets = networkTargetDefinitions.map((definition) => ({
+            ...definition,
+            ...(summaryById.get(definition.id) || {}),
+        }));
+        summaryTargets.forEach((target) => {
+            const targetId = String(target?.id || "");
+            if (targetId && !networkTargetDefinitions.some((definition) => definition.id === targetId)) {
+                targets.push(target);
+            }
+        });
 
         return targets.filter((target) => {
             const targetId = String(target?.id || "");
@@ -306,6 +333,60 @@
         return value || "判定中";
     }
 
+    function getWindowQuality(target, baseCount) {
+        const sampleField = `loss${baseCount}SampleCount`;
+        const lossField = `loss${baseCount}Percent`;
+        const count = Number(target?.[sampleField] || 0);
+        if (count < baseCount) return "計測中";
+        const loss = Number(target?.[lossField] || 0);
+        if (loss >= 10) return "通信が非常に不安定";
+        if (loss >= 5) return "通信品質異常";
+        if (loss >= 2) return "通信品質低下";
+        if (loss >= 1) return "要観察";
+        return "正常";
+    }
+
+    function getTargetPresentation(target) {
+        const quality = formatQualityLabel(target?.quality, target?.loss600SampleCount);
+        const longQualities = [
+            target?.quality3600 || getWindowQuality(target, 3600),
+            target?.quality21600 || getWindowQuality(target, 21600),
+        ];
+        const hasQualityHistory = quality === "正常" && longQualities.some((value) =>
+            value !== "正常" && value !== "計測中",
+        );
+
+        if (quality === "オフライン") {
+            return { type: "offline", label: quality, menuIcon: "off-line.png", centerIcon: "off-line.png" };
+        }
+        if (hasQualityHistory) {
+            return { type: "history", label: "正常（品質低下履歴あり）", menuIcon: "verification.png", centerIcon: "verification.png" };
+        }
+        if (quality === "計測中") {
+            return { type: "measuring", label: quality, menuIcon: "hourglass.png", centerIcon: "hourglass.png" };
+        }
+        if (quality === "正常") {
+            return { type: "normal", label: quality, menuIcon: "internet_ok.png", centerIcon: "ok.png" };
+        }
+        return { type: "warning", label: quality, menuIcon: "caution.png", centerIcon: "caution.png" };
+    }
+
+    function formatCount(value) {
+        return new Intl.NumberFormat("ja-JP").format(Number(value || 0));
+    }
+
+    function getMeasurementCount(target) {
+        const explicitCount = Number(target?.measurementCount);
+        if (Number.isFinite(explicitCount) && explicitCount > 0) return explicitCount;
+
+        return Math.max(
+            Number(target?.loss100SampleCount || 0),
+            Number(target?.loss600SampleCount || 0),
+            Number(target?.loss3600SampleCount || 0),
+            Number(target?.loss21600SampleCount || 0),
+        );
+    }
+
     function getHistoryQuery(offset = 0, limit = defaultHistoryLimit) {
         const params = new URLSearchParams();
         params.set("limit", dashboardState.view === "detail" ? String(limit) : "20");
@@ -338,6 +419,13 @@
 
     async function loadNetworkStatus(options = {}) {
         const append = Boolean(options.append);
+        const summaryOnly = Boolean(options.summaryOnly);
+        if (summaryOnly) {
+            const payload = await callApi("/network/status?summaryOnly=1");
+            dashboardState.summary = payload.summary || null;
+            return;
+        }
+
         const offset = append ? dashboardState.history.length : 0;
         const limit = dashboardState.view === "detail" ? defaultHistoryLimit : 20;
         const payload = await callApi(`/network/status?${getHistoryQuery(offset, limit)}`);
@@ -365,34 +453,67 @@
         return `<div class="network-dashboard-status ${getStatusClass(summary)}"><span></span>${escapeHtml(statusText)}</div>`;
     }
 
-    function buildTargetCard(target) {
-        if (!target) return "";
-        const qualityLabel = formatQualityLabel(target.quality, target.loss600SampleCount);
-        const statusClass = qualityLabel === "オフライン" || qualityLabel === "通信エラー" ? "danger" : qualityLabel === "正常" ? "normal" : "warning";
+    function buildTargetMenu(targets) {
+        return targets.map((target) => {
+            const presentation = getTargetPresentation(target);
+            return `
+                <button class="network-target-menu-item ${target.id === dashboardState.targetId ? "is-active" : ""}" type="button" data-action="target" data-target-id="${escapeHtml(target.id)}">
+                    <img src="img/${escapeHtml(presentation.menuIcon)}" alt="">
+                    <span><strong>${escapeHtml(target.name || target.id)}</strong><small>状態：<b class="is-${presentation.type}">${escapeHtml(presentation.label)}</b></small></span>
+                </button>
+            `;
+        }).join("");
+    }
+
+    function buildLossRow(target, count) {
+        const quality = getWindowQuality(target, count);
+        const sampleCount = Number(target?.[`loss${count}SampleCount`] || 0);
+        const value = sampleCount < count ? "" : formatPercent(target?.[`loss${count}Percent`]);
+        const statusType = quality === "正常" ? "normal" : quality === "計測中" ? "measuring" : "warning";
+        const icon = quality === "正常" ? "ok.png" : quality === "計測中" ? "hourglass.png" : "caution.png";
         return `
-            <section class="network-summary-card">
-                <div class="network-card-header">
-                    <h3>${escapeHtml(target.name)}</h3>
-                    <button class="network-card-detail" type="button" data-action="detail" data-target-id="${escapeHtml(target.id)}">ログ一覧</button>
+            <div class="network-loss-row">
+                <span>直近</span><strong>${formatCount(count)}回</strong>
+                <span>${escapeHtml(value)}</span>
+                <b class="is-${statusType}"><img src="img/${icon}" alt="">${escapeHtml(quality)}</b>
+            </div>
+        `;
+    }
+
+    function buildSelectedTargetPanel(target) {
+        if (!target) return `<section class="network-selected-panel"></section>`;
+        const presentation = getTargetPresentation(target);
+        return `
+            <section class="network-selected-panel">
+                <h3>${escapeHtml(target.name || target.id)}</h3>
+                <div class="network-path-visual">
+                    <img class="network-endpoint-image" src="img/computer.png" alt="コンピューター">
+                    <div class="network-path-line"><img src="img/${escapeHtml(presentation.centerIcon)}" alt=""></div>
+                    <img class="network-endpoint-image" src="img/network.png" alt="インターネット">
                 </div>
-                <div class="network-address">対象：${escapeHtml(target.address || "-")}</div>
-                <div class="network-quality ${statusClass}"><span></span>${escapeHtml(qualityLabel)}</div>
-                <div class="network-summary-section-title">通信状況</div>
-                <dl class="network-summary-metrics">
+                <div class="network-selected-status is-${presentation.type}">${escapeHtml(presentation.label)}</div>
+                <div class="network-summary-section-title">対象</div>
+                <div class="network-selected-address">${escapeHtml(target.address || "-")}</div>
+                <div class="network-summary-section-title">直近状況</div>
+                <dl class="network-summary-metrics network-selected-metrics">
                     <dt>結果</dt><dd>${escapeHtml(target.result || "-")}</dd>
                     <dt>応答時間</dt><dd>${escapeHtml(formatMs(target.responseTimeMs))}</dd>
-                    <dt>連続失敗</dt><dd>${escapeHtml(target.consecutiveFailures || 0)} 回</dd>
+                    <dt>連続失敗</dt><dd>${formatCount(target.consecutiveFailures)} 回</dd>
+                    <dt>累計検証回数</dt><dd>${formatCount(getMeasurementCount(target))} 回</dd>
                 </dl>
-                <div class="network-summary-section-title">直近のパケットロス率</div>
-                <dl class="network-summary-metrics">
-                    <dt>${escapeHtml(formatSampleHeaderLabel(100))}</dt><dd>${escapeHtml(formatMeasuredPercent(target.loss100Percent, target.loss100SampleCount, 100))}</dd>
-                    <dt>${escapeHtml(formatSampleHeaderLabel(600))}</dt><dd>${escapeHtml(formatMeasuredPercent(target.loss600Percent, target.loss600SampleCount, 600))}</dd>
-                </dl>
+                <div class="network-summary-section-title">パケットロス率</div>
+                <div class="network-loss-list">
+                    ${buildLossRow(target, 100)}
+                    ${buildLossRow(target, 600)}
+                    ${buildLossRow(target, 3600)}
+                    ${buildLossRow(target, 21600)}
+                </div>
+                <button class="network-card-detail" type="button" data-action="detail" data-target-id="${escapeHtml(target.id)}">詳細ログ確認</button>
             </section>
         `;
     }
 
-    function buildDataUpdates(summary) {
+    function buildOperationsPanel(summary) {
         const updates = summary?.dataUpdates || [];
         const items = updates.map((item) => `
             <div class="network-data-update-item">
@@ -404,9 +525,14 @@
             </div>
         `).join("");
         const today = summary?.today || {};
+        const errorPanel = dashboardState.errorMessage ? `
+            <div class="network-summary-section-title">通信状況取得エラー表示</div>
+            <div class="network-summary-error-box">${escapeHtml(dashboardState.errorMessage)}</div>
+            <button class="network-card-detail" type="button" data-action="dashboard-error-detail">詳細ログ確認</button>
+        ` : "";
 
         return `
-            <section class="network-summary-card network-data-card">
+            <section class="network-operations-panel">
                 <div class="network-summary-section-title">データ更新時刻</div>
                 ${items}
                 <div class="network-summary-section-title">本日の通信状況</div>
@@ -416,6 +542,11 @@
                     <dt>累計オフライン</dt><dd>${escapeHtml(today.totalOfflineSeconds || 0)} 秒</dd>
                     <dt>最終ロス</dt><dd>${escapeHtml(formatDateTime(today.lastLossAt))}</dd>
                 </dl>
+                <div class="network-summary-section-title">最終再起動日時</div>
+                <dl class="network-summary-metrics">
+                    <dt>最終再起動</dt><dd>${escapeHtml(formatDateTime(summary?.lastBootTime || summary?.monitorStartedAt))}</dd>
+                </dl>
+                ${errorPanel}
             </section>
         `;
     }
@@ -423,27 +554,26 @@
     function renderSummaryView() {
         const summary = dashboardState.summary;
         const targets = getUniqueTargets(summary);
+        const selectedTarget = getTarget(dashboardState.targetId);
         const updatedAt = formatDateTime(summary?.updateTime);
-        const errorHtml = dashboardState.errorMessage
-            ? `<div class="network-dashboard-error">通信状況を取得できませんでした。${escapeHtml(dashboardState.errorMessage)}</div>`
-            : "";
 
         networkModal.innerHTML = `
             <div class="network-modal-backdrop" data-action="close"></div>
             <div class="network-modal-dialog" role="dialog" aria-modal="true" aria-label="通信状況表示ダッシュボード">
                 <div class="network-modal-title">通信状況表示ダッシュボード</div>
-                ${errorHtml}
                 <div class="network-modal-header-row">
                     ${buildStatusBadge(summary)}
                     <div class="network-last-updated">最終更新 ${escapeHtml(updatedAt)}</div>
                 </div>
-                <div class="network-summary-grid">
-                    ${targets.map(buildTargetCard).join("")}
-                    ${buildDataUpdates(summary)}
+                <div class="network-dashboard-layout">
+                    <nav class="network-target-menu">${buildTargetMenu(targets)}</nav>
+                    ${buildSelectedTargetPanel(selectedTarget)}
+                    ${buildOperationsPanel(summary)}
                 </div>
                 <div class="network-modal-actions">
                     <button class="network-secondary-button" type="button" data-action="close">閉じる</button>
                 </div>
+                ${buildErrorDetailModal()}
             </div>
         `;
     }
@@ -455,6 +585,9 @@
             gateway: "デフォルトゲートウェイ",
             "dns-default": "nslookup（既定DNS）",
             "dns-google": "nslookup（8.8.8.8）",
+            "tcp-google-443": "TCP（443）",
+            "web-google": "Web（Google）",
+            "web-microsoft": "Web（Microsoft）",
         };
         return targets.map((target) => `
             <button class="network-tab ${target.id === dashboardState.targetId ? "is-active" : ""}" type="button" data-action="target" data-target-id="${escapeHtml(target.id)}">
@@ -502,10 +635,10 @@
 
     function buildHistoryRows(records) {
         if (dashboardState.loading) {
-            return `<tr><td colspan="9" class="network-empty-row">通信履歴を取得しています</td></tr>`;
+            return `<tr><td colspan="11" class="network-empty-row">通信履歴を取得しています</td></tr>`;
         }
         if (records.length === 0) {
-            return `<tr><td colspan="9" class="network-empty-row">表示できる測定結果がありません</td></tr>`;
+            return `<tr><td colspan="11" class="network-empty-row">表示できる測定結果がありません</td></tr>`;
         }
 
         return records.map((record) => `
@@ -517,6 +650,8 @@
                 <td>${escapeHtml(record.consecutiveFailures || 0)}</td>
                 <td>${escapeHtml(formatRecordLossPercent(record, "loss100Percent", "loss100SampleCount", 100))}</td>
                 <td>${escapeHtml(formatRecordLossPercent(record, "loss600Percent", "loss600SampleCount", 600))}</td>
+                <td>${escapeHtml(formatRecordLossPercent(record, "loss3600Percent", "loss3600SampleCount", 3600))}</td>
+                <td>${escapeHtml(formatRecordLossPercent(record, "loss21600Percent", "loss21600SampleCount", 21600))}</td>
                 <td>${escapeHtml(formatQualityLabel(record.quality, record.loss600SampleCount))}</td>
                 <td><button class="network-detail-button" type="button" data-action="error-detail" data-record-key="${escapeHtml(getRecordKey(record))}">詳細</button></td>
             </tr>
@@ -563,10 +698,10 @@
                         <table class="network-history-table">
                             <thead>
                                 <tr>
-                                    <th>日付</th><th>時刻</th><th>結果</th><th>応答時間</th><th>連続失敗</th><th>${escapeHtml(getSampleHeaderLabel(100))}のロス率</th><th>${escapeHtml(getSampleHeaderLabel(600))}のロス率</th><th>判定</th><th>詳細</th>
+                                    <th>日付</th><th>時刻</th><th>結果</th><th>応答時間</th><th>連続失敗</th><th>${escapeHtml(getSampleHeaderLabel(100))}のロス率</th><th>${escapeHtml(getSampleHeaderLabel(600))}のロス率</th><th>${escapeHtml(getSampleHeaderLabel(3600))}のロス率</th><th>${escapeHtml(getSampleHeaderLabel(21600))}のロス率</th><th>判定</th><th>詳細</th>
                                 </tr>
                             </thead>
-                            <tbody>${buildHistoryRows(records)}${dashboardState.loadingMore ? `<tr><td colspan="9" class="network-empty-row">追加の通信履歴を取得しています</td></tr>` : ""}</tbody>
+                            <tbody>${buildHistoryRows(records)}${dashboardState.loadingMore ? `<tr><td colspan="11" class="network-empty-row">追加の通信履歴を取得しています</td></tr>` : ""}</tbody>
                         </table>
                     </div>
                 </div>
@@ -646,6 +781,15 @@
     }
     function buildErrorDetailModal() {
         const record = dashboardState.selectedRecord;
+        if (dashboardState.dashboardErrorDetailOpen && dashboardState.errorMessage) {
+            return `
+                <div class="network-error-detail-backdrop" data-action="close-error-detail"></div>
+                <div class="network-error-detail-dialog" role="dialog" aria-modal="true" aria-label="通信状況取得エラー詳細">
+                    <div class="network-error-detail-title">通信状況取得エラー</div>
+                    <pre>${escapeHtml(dashboardState.errorMessage)}</pre>
+                </div>
+            `;
+        }
         if (!record) return "";
         const detailTitle = record.result === "OK" ? "応答内容" : "エラー内容";
 
@@ -694,7 +838,10 @@
         try {
             dashboardState.loading = dashboardState.view === "detail" && options.force;
             if (dashboardState.loading && !networkModal.hidden) renderDashboard();
-            await loadNetworkStatus({ append: false });
+            await loadNetworkStatus({
+                append: false,
+                summaryOnly: dashboardState.view === "summary",
+            });
             dashboardState.loading = false;
             if (!networkModal.hidden) renderDashboard();
         } catch (error) {
@@ -851,12 +998,14 @@
             dashboardState.view = "summary";
             dashboardState.dateEditorOpen = false;
             dashboardState.selectedRecord = null;
+            dashboardState.dashboardErrorDetailOpen = false;
             resetHistoryAndRefresh();
         }
         if (action === "detail") openDetail(actionElement.dataset.targetId);
         if (action === "target") {
             dashboardState.targetId = actionElement.dataset.targetId || dashboardState.targetId;
             dashboardState.selectedRecord = null;
+            dashboardState.dashboardErrorDetailOpen = false;
             resetHistoryAndRefresh();
         }
         if (action === "filter") {
@@ -892,8 +1041,13 @@
             dashboardState.selectedRecord = filterHistory().find((record) => getRecordKey(record) === recordKey) || null;
             renderDashboardPreservingHistoryScroll();
         }
+        if (action === "dashboard-error-detail") {
+            dashboardState.dashboardErrorDetailOpen = true;
+            renderDashboard();
+        }
         if (action === "close-error-detail") {
             dashboardState.selectedRecord = null;
+            dashboardState.dashboardErrorDetailOpen = false;
             renderDashboardPreservingHistoryScroll();
         }
         if (action === "date-field") {
