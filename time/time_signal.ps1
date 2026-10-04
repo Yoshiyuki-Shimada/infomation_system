@@ -26,6 +26,8 @@ $networkDatabaseInitialized = $false
 $lastValidNetworkSummary = $null
 $timeSignalTriggerGraceSeconds = 20
 $newsFetcherLauncherPath = Join-Path $projectDir "bin\start_news_fetcher.ps1"
+$informationControlModulePath = Join-Path $PSScriptRoot "information_control.ps1"
+. $informationControlModulePath
 
 function Write-TimeSignalLog {
     param(
@@ -562,10 +564,10 @@ function Get-TimeSignalPauseStatusJson {
 
 function Start-TimeSignalControlServer {
     try {
-        $endpoint = [Net.IPEndPoint]::new([Net.IPAddress]::Parse("127.0.0.1"), $timeSignalControlPort)
+        $endpoint = [Net.IPEndPoint]::new([Net.IPAddress]::Any, $timeSignalControlPort)
         $script:timeSignalControlListener = [Net.Sockets.TcpListener]::new($endpoint)
         $script:timeSignalControlListener.Start()
-        Write-Host "時報制御受付を開始: http://127.0.0.1:$timeSignalControlPort/"
+        Write-Host "時報・管理画面受付を開始: http://0.0.0.0:$timeSignalControlPort/"
     }
     catch {
         Write-Host "時報制御受付を開始できません: $($_.Exception.Message)"
@@ -577,16 +579,17 @@ function Send-TimeSignalControlResponse {
     param(
         [Net.Sockets.TcpClient]$Client,
         [string]$Body,
-        [string]$Status = "200 OK"
+        [string]$Status = "200 OK",
+        [string]$ContentType = "application/json; charset=utf-8"
     )
 
     $writer = [IO.StreamWriter]::new($Client.GetStream(), [Text.UTF8Encoding]::new($false))
     try {
         $bytes = [Text.Encoding]::UTF8.GetByteCount($Body)
         $writer.Write("HTTP/1.1 $Status`r`n")
-        $writer.Write("Content-Type: application/json; charset=utf-8`r`n")
+        $writer.Write("Content-Type: $ContentType`r`n")
         $writer.Write("Access-Control-Allow-Origin: *`r`n")
-        $writer.Write("Access-Control-Allow-Methods: GET, OPTIONS`r`n")
+        $writer.Write("Access-Control-Allow-Methods: GET, POST, OPTIONS`r`n")
         $writer.Write("Access-Control-Allow-Headers: Content-Type`r`n")
         $writer.Write("Cache-Control: no-store`r`n")
         $writer.Write("Content-Length: $bytes`r`n")
@@ -618,6 +621,10 @@ function Invoke-TimeSignalControlRequest {
 
     if ($uri.AbsolutePath -eq "/time-signal/network/status") {
         return Get-NetworkStatusJson -Uri $uri
+    }
+
+    if ($uri.AbsolutePath -eq "/time-signal/status") {
+        return Get-TimeSignalPauseStatusJson
     }
 
     if ($uri.AbsolutePath -eq "/time-signal/information/display-log") {
@@ -672,8 +679,9 @@ function Invoke-TimeSignalControlRequest {
     if ($uri.AbsolutePath -eq "/time-signal/pause") {
         $minutesText = if ($uri.Query -match "minutes=([^&]+)") { [Uri]::UnescapeDataString($matches[1]) } else { "" }
         $untilMsText = if ($uri.Query -match "untilMs=([^&]+)") { [Uri]::UnescapeDataString($matches[1]) } else { "" }
+        $isAdminRequest = (Get-QueryValue -Uri $uri -Name "admin") -eq "1"
         $now = Get-Date
-        if (Test-TimeSignalQuietHours -Now $now) {
+        if (-not $isAdminRequest -and (Test-TimeSignalQuietHours -Now $now)) {
             Clear-TimeSignalPause
             return Get-TimeSignalPauseStatusJson
         }
@@ -683,18 +691,52 @@ function Invoke-TimeSignalControlRequest {
         if ($untilMsText) {
             $until = [DateTimeOffset]::FromUnixTimeMilliseconds([int64]$untilMsText).LocalDateTime
             if ($until -le $now) { $until = $now.AddMinutes(1) }
-            if ($until -gt $reset) { $until = $reset }
+            if (-not $isAdminRequest -and $until -gt $reset) { $until = $reset }
         }
         elseif ($minutesText -and $minutesText -ne "day") {
             $minutes = [int]$minutesText
             $until = $now.AddMinutes($minutes)
-            if ($until -gt $reset) { $until = $reset }
+            if (-not $isAdminRequest -and $until -gt $reset) { $until = $reset }
         }
         Save-TimeSignalPauseUntil -Until $until
         return Get-TimeSignalPauseStatusJson
     }
 
     return Get-TimeSignalPauseStatusJson
+}
+
+function Test-InformationControlClientAllowed {
+    param([Net.IPAddress]$Address)
+
+    if ([Net.IPAddress]::IsLoopback($Address)) { return $true }
+    if ($Address.IsIPv4MappedToIPv6) { $Address = $Address.MapToIPv4() }
+    if ($Address.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) {
+        return $false
+    }
+
+    $bytes = $Address.GetAddressBytes()
+    if ($bytes[0] -eq 10) { return $true }
+    if ($bytes[0] -eq 192 -and $bytes[1] -eq 168) { return $true }
+    return $bytes[0] -eq 172 -and $bytes[1] -ge 16 -and $bytes[1] -le 31
+}
+
+function Read-TimeSignalRequestBody {
+    param(
+        [IO.StreamReader]$Reader,
+        [int]$ContentLength
+    )
+
+    if ($ContentLength -le 0) { return "" }
+    $builder = New-Object Text.StringBuilder
+    $receivedBytes = 0
+    while ($receivedBytes -lt $ContentLength) {
+        $value = $Reader.Read()
+        if ($value -lt 0) { break }
+        $character = [char]$value
+        [void]$builder.Append($character)
+        $receivedBytes += [Text.Encoding]::UTF8.GetByteCount([string]$character)
+    }
+    return $builder.ToString()
 }
 
 function Process-TimeSignalControlRequests {
@@ -709,7 +751,7 @@ function Process-TimeSignalControlRequests {
         try {
             $client.ReceiveTimeout = 1000
             $stream = $client.GetStream()
-            $reader = [IO.StreamReader]::new($stream, [Text.Encoding]::ASCII, $false, 1024, $true)
+            $reader = [IO.StreamReader]::new($stream, [Text.Encoding]::UTF8, $false, 1024, $true)
             $requestLine = $reader.ReadLine()
             if (-not $requestLine) {
                 Send-TimeSignalControlResponse -Client $client -Body "{}" -Status "400 Bad Request"
@@ -717,16 +759,59 @@ function Process-TimeSignalControlRequests {
             }
 
             $parts = $requestLine.Split(" ")
-            if ($parts[0] -eq "OPTIONS") {
+            if ($parts.Count -lt 2) {
+                Send-TimeSignalControlResponse -Client $client -Body "{}" -Status "400 Bad Request"
+                continue
+            }
+
+            $method = $parts[0].ToUpperInvariant()
+            $target = $parts[1]
+            $headers = @{}
+            while ($true) {
+                $headerLine = $reader.ReadLine()
+                if ([string]::IsNullOrEmpty($headerLine)) { break }
+                $separator = $headerLine.IndexOf(":")
+                if ($separator -le 0) { continue }
+                $headers[$headerLine.Substring(0, $separator).Trim().ToLowerInvariant()] = `
+                    $headerLine.Substring($separator + 1).Trim()
+            }
+
+            if ($method -eq "OPTIONS") {
                 Send-TimeSignalControlResponse -Client $client -Body "{}"
                 continue
             }
-            if ($parts[0] -ne "GET" -or $parts.Count -lt 2) {
+            if ($method -notin @("GET", "POST")) {
                 Send-TimeSignalControlResponse -Client $client -Body "{}" -Status "405 Method Not Allowed"
                 continue
             }
 
-            $body = Invoke-TimeSignalControlRequest -Target $parts[1]
+            $contentLength = 0
+            if ($headers.ContainsKey("content-length")) {
+                [void][int]::TryParse($headers["content-length"], [ref]$contentLength)
+            }
+            $requestBody = Read-TimeSignalRequestBody -Reader $reader -ContentLength $contentLength
+            $uri = [Uri]::new("http://127.0.0.1:$timeSignalControlPort$target")
+            if ($uri.AbsolutePath.StartsWith("/infomation_control")) {
+                $remoteAddress = ([Net.IPEndPoint]$client.Client.RemoteEndPoint).Address
+                if (-not (Test-InformationControlClientAllowed -Address $remoteAddress)) {
+                    Send-TimeSignalControlResponse -Client $client -Body "Forbidden" -Status "403 Forbidden" -ContentType "text/plain; charset=utf-8"
+                    continue
+                }
+
+                $response = Invoke-InformationControlRequest -Uri $uri -Method $method -Body $requestBody
+                Send-TimeSignalControlResponse `
+                    -Client $client `
+                    -Body $response.Body `
+                    -Status $response.Status `
+                    -ContentType $response.ContentType
+                continue
+            }
+            if ($method -ne "GET") {
+                Send-TimeSignalControlResponse -Client $client -Body "{}" -Status "405 Method Not Allowed"
+                continue
+            }
+
+            $body = Invoke-TimeSignalControlRequest -Target $target
             Send-TimeSignalControlResponse -Client $client -Body $body
         }
         catch {
@@ -974,6 +1059,7 @@ catch {
     Write-TimeSignalLog -Level "WARN" -Message "ニュース取得ランチャーの起動確認に失敗しました: $($_.Exception.Message)"
 }
 
+Initialize-InformationControl
 Start-TimeSignalControlServer
 while ($true) {
     # HTTP制御に待たされても時報枠を逃さないよう、時報判定を先に行う。

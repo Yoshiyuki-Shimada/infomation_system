@@ -136,6 +136,27 @@ function Write-NewsFetchLog {
     }
 }
 
+function Invoke-Utf8JsonRequest {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Uri
+    )
+
+    # Windows PowerShell 5.1はcharset未指定のJSONを誤判定する場合があるため、
+    # 生のレスポンスをUTF-8として復号してからJSONへ変換する。
+    $webClient = New-Object System.Net.WebClient
+    $webClient.Headers[[Net.HttpRequestHeader]::UserAgent] = $ua
+
+    try {
+        $responseBytes = $webClient.DownloadData($Uri)
+        $jsonText = [Text.Encoding]::UTF8.GetString($responseBytes)
+        return $jsonText | ConvertFrom-Json
+    }
+    finally {
+        $webClient.Dispose()
+    }
+}
+
 
 while ($true) {
     $data = @{
@@ -164,7 +185,7 @@ while ($true) {
         if ($null -ne $w.generationtime_ms) { $w.generationtime_ms = 0 }
 
         try {
-            $jma = Invoke-RestMethod -Uri "https://www.jma.go.jp/bosai/forecast/data/forecast/270000.json"
+            $jma = Invoke-Utf8JsonRequest -Uri "https://www.jma.go.jp/bosai/forecast/data/forecast/270000.json"
             $popSeries = $jma[0].timeSeries | Where-Object { $_.areas[0].pops } | Select-Object -First 1
 
             if ($popSeries) {
@@ -514,8 +535,31 @@ while ($true) {
             param($Line, $Detail)
 
             $targets = @("こうのとり", "はまかぜ", "きのさき", "はしだて", "まいづる", "はるか", "くろしお", "サンダーバード", "らくラクびわこ", "らくラクはりま", "らくラクやまと", "まほろば", "スーパーはくと", "サンライズ瀬戸", "サンライズ出雲", "サンライズ瀬戸・出雲")
-            $searchText = Get-JRWestDetailSearchText -Line $Line -Detail $Detail
+            $lineName = (Get-JRWestLineName -Line $Line).Trim()
+
+            # APIは特急ごとに列車名を持つ。過去版の本文に別列車名が混入しても拾わない。
+            if (-not [string]::IsNullOrWhiteSpace($lineName)) {
+                if ($lineName -eq "スーパーいなば") { return @() }
+                if ($targets -contains $lineName) { return @($lineName) }
+                return @()
+            }
+
+            # 列車名が欠落した応答のみ、最新詳細の本文から補完する。
+            $latestDetail = Get-JRWestLatestVersionDetail -Detail $Detail
+            if (-not $latestDetail) { return @() }
+            $searchText = $latestDetail | ConvertTo-Json -Depth 12 -Compress
             return @($targets | Where-Object { $searchText -match [regex]::Escape($_) })
+        }
+
+        function Get-JRWestLimitedExpressDisplayName {
+            param([string]$TrainName)
+
+            switch ($TrainName) {
+                "サンライズ瀬戸" { return "寝台特急サンライズ瀬戸" }
+                "サンライズ出雲" { return "寝台特急サンライズ出雲" }
+                "サンライズ瀬戸・出雲" { return "寝台特急サンライズ瀬戸・出雲" }
+                default { return "特急$TrainName" }
+            }
         }
 
         function Get-JRWestPropertyValue {
@@ -697,7 +741,7 @@ while ($true) {
             $latestDetail = Get-JRWestLatestVersionDetail -Detail $Detail
             $title = if ($latestDetail) { [string]$latestDetail.title } else { "" }
             $body = if ($latestDetail) { [string]$latestDetail.body } else { "" }
-            $isLimitedExpress = $DisplayName -match "^特急"
+            $isLimitedExpress = $DisplayName -match "^(?:寝台)?特急"
             if ($isLimitedExpress) {
                 $targetTrainText = Get-JRWestLimitedExpressTargetTrainText `
                     -Detail $Detail `
@@ -757,12 +801,13 @@ while ($true) {
                     if ($LimitedExpressMode) {
                         $matchedNames = Get-JRWestMatchedLimitedExpressNames -Line $line -Detail $detail
                         foreach ($matchedName in $matchedNames) {
+                            $displayName = Get-JRWestLimitedExpressDisplayName -TrainName $matchedName
                             Add-JRWestTrafficInfoEntry `
                                 -Results $Results `
                                 -SeenKeys $SeenKeys `
                                 -Line $line `
                                 -Detail $detail `
-                                -DisplayName "特急$matchedName"
+                                -DisplayName $displayName
                         }
                     }
                     else {

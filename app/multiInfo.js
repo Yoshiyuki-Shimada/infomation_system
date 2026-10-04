@@ -280,6 +280,40 @@ function getUpdateSignature(value) {
     }
 }
 
+function getDisasterPriorityKinds(data) {
+    const candidates = [
+        { kind: "eew", active: !!data?.eew, issueTime: data?.eew?.issueTime },
+        {
+            kind: "tsunami",
+            active: !!data?.tsunami?.active,
+            issueTime: data?.tsunami?.issueTime,
+        },
+        {
+            kind: "earthquake",
+            active: !!data?.earthquake,
+            issueTime: data?.earthquake?.issueTime,
+        },
+    ];
+
+    return candidates
+        .filter((candidate) => candidate.active)
+        .map((candidate, index) => ({
+            ...candidate,
+            index,
+            receivedAt: Date.parse(candidate.issueTime || ""),
+        }))
+        .sort((left, right) => {
+            const leftTime = Number.isNaN(left.receivedAt)
+                ? Number.NEGATIVE_INFINITY
+                : left.receivedAt;
+            const rightTime = Number.isNaN(right.receivedAt)
+                ? Number.NEGATIVE_INFINITY
+                : right.receivedAt;
+            return rightTime - leftTime || left.index - right.index;
+        })
+        .map((candidate) => candidate.kind);
+}
+
 function getComparableSignageData(data) {
     const comparable = JSON.parse(JSON.stringify(data || {}));
     delete comparable.updateTime;
@@ -445,8 +479,8 @@ function updateSignage() {
         return;
     }
     if (earthquakeSignature !== activeEarthquakeSignature) {
-        const currentCycle = getSlideCycleRange(currentSlide)?.cycleIndex || 0;
-        renderActiveSignage(currentCycle);
+        // 災害情報はサイクル位置を引き継がず、最後に受信した情報へ即時切り替える。
+        renderActiveSignage(0);
     }
 }
 
@@ -483,22 +517,23 @@ function renderActiveSignage(startCycleIndex = 0) {
     const alertInfo = [...emergencyList, ...evacuationList];
     const transitInfo = [...railwayList, ...scheduleList];
     const isDisasterPriority = activeEarthquakeData?.priorityMode === "disaster";
-    const hasEarthquakeBottomBanner = activeEarthquakeData?.priorityMode === "bottom" || !!activeEarthquakeData?.emergencyMode?.active;
 
     let cycles = [];
     if (isDisasterPriority) {
-        cycles = [[
+        const priorityKinds = getDisasterPriorityKinds(activeEarthquakeData);
+        cycles = priorityKinds.map((kind) => [
             createDisasterPriorityHtml(
                 activeEarthquakeData,
                 signageData.railway || [],
+                kind,
             ),
-        ]];
+        ]);
     } else {
         const newsCycles = newsArticles.length > 0 ? newsArticles : [[]];
         cycles = newsCycles.map((newsPages, index) => {
             return [
                 ...alertInfo,
-                ...(index % 3 === 0 ? weatherList : []),
+                ...weatherList,
                 ...transitInfo,
                 ...newsPages,
             ].filter((slide) => slide !== "");
@@ -519,19 +554,14 @@ function renderActiveSignage(startCycleIndex = 0) {
         });
     });
 
-    const bottomBannerHtml =
-        !isDisasterPriority && hasEarthquakeBottomBanner
-            ? createEarthquakeBottomBannerHtml(activeEarthquakeData)
-            : "";
-
     const container = document.getElementById("slide-container");
-    container?.classList.toggle("with-earthquake-bottom-banner", !!bottomBannerHtml);
+    container?.classList.remove("with-earthquake-bottom-banner");
     console.log("リスト" + slideList.length);
-    if (slideList.length > 0 || bottomBannerHtml) {
+    if (slideList.length > 0) {
         document.getElementById("idle-view").style.display = "none";
         document.getElementById("signage-header").style.display = "flex";
         clearEmergencyInfoTimer();
-        container.innerHTML = slideList.join("") + bottomBannerHtml;
+        container.innerHTML = slideList.join("");
         startEmergencyInfoLineRotation(container);
         container.style.display = "block";
 
@@ -575,7 +605,10 @@ function importEarthquakeData() {
     if (!q) return;
 
     if (activeEarthquakeData) {
-        if (activeEarthquakeData.priorityMode === "disaster") {
+        if (
+            activeEarthquakeData.priorityMode === "disaster" ||
+            activeEarthquakeData.priorityMode === "normal"
+        ) {
             emergencyList.push(createEarthquakeHtml(q));
         }
         return;
@@ -1468,6 +1501,33 @@ async function fetchNewData() {
         );
         loadStatusDataThenUpdate(requestId);
     }
+}
+
+let earthquakeFastReloadInProgress = false;
+let earthquakeFastReloadRequestId = 0;
+
+/** P2Pの即時受信結果だけを軽量に再読込する。 */
+function refreshEarthquakeDataFast() {
+    if (earthquakeFastReloadInProgress) return;
+
+    earthquakeFastReloadInProgress = true;
+    const requestId = ++earthquakeFastReloadRequestId;
+    const oldScript = document.getElementById("earthquake-fast-script");
+    if (oldScript) oldScript.remove();
+
+    const script = document.createElement("script");
+    script.id = "earthquake-fast-script";
+    script.src = getReloadableDataScriptSource("temp/earthquake_data.js");
+    script.onload = () => {
+        if (requestId === earthquakeFastReloadRequestId) {
+            updateSignageWithRetryLogging();
+        }
+        earthquakeFastReloadInProgress = false;
+    };
+    script.onerror = () => {
+        earthquakeFastReloadInProgress = false;
+    };
+    document.body.appendChild(script);
 }
 
 function updateSignageWithRetryLogging() {

@@ -372,6 +372,29 @@ html {
     color: var(--mint-green);
 }
 
+#debug-mode.information-control-test-banner,
+.liner-online-status.information-control-test-banner {
+    align-self: stretch;
+    min-width: 40%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 24px;
+    border: 2px solid var(--snow-white);
+    background: #ffe766;
+    color: #000;
+    font-size: 1.6rem;
+    font-weight: 800;
+}
+
+.information-control-override.is-critical .no-bus-ja {
+    color: #e02135;
+}
+
+.information-control-override.is-warning .no-bus-ja {
+    color: #ffe766;
+}
+
 /* 上部固定の時計（データ取得時のみ） */
 .top-header {
     height: 60px;

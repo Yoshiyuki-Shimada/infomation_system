@@ -1,0 +1,196 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net6.0-windows10.0.18362.0</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <StartupObject></StartupObject>
+    <Product>P2P地震情報</Product>
+    <PackageId>P2PQuake</PackageId>
+    <Authors>P2PQuake development team</Authors>
+    <Company></Company>
+    <AssemblyName>P2PQuake</AssemblyName>
+    <PackageProjectUrl>https://www.p2pquake.net/</PackageProjectUrl>
+    <AssemblyVersion>0.35.0.13</AssemblyVersion>
+    <FileVersion>0.35.0.13</FileVersion>
+    <Version>0.35.13</Version>
+    <RepositoryUrl>https://github.com/p2pquake/epsp-peer-cs</RepositoryUrl>
+    <ApplicationIcon>Resources\Icons\p2pquake.ico</ApplicationIcon>
+    <NoWin32Manifest>true</NoWin32Manifest>
+    <NeutralLanguage>ja-JP</NeutralLanguage>
+    <SatelliteResourceLanguages>ja-JP</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
+    <DebugType>embedded</DebugType>
+    <DebugSymbols>true</DebugSymbols>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ApplicationDefinition Remove="App.xaml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Remove="Resources\Examples\japan_1024.png" />
+    <None Remove="Resources\Icons\eruption_white.png" />
+    <None Remove="Resources\Icons\icon.png" />
+    <None Remove="Resources\Icons\tsunami.svg" />
+    <None Remove="Resources\Icons\tsunami_black.png" />
+    <None Remove="Resources\Icons\tsunami_gray.png" />
+    <None Remove="Resources\Icons\tsunami_red.png" />
+    <None Remove="Resources\Icons\tsunami_white.png" />
+    <None Remove="Resources\Icons\tsunami_yellow.png" />
+    <None Remove="Resources\Icons\userquake.svg" />
+    <None Remove="Resources\Icons\userquake_black.png" />
+    <None Remove="Resources\Icons\userquake_gray.png" />
+    <None Remove="Resources\Icons\userquake_red.png" />
+    <None Remove="Resources\Icons\userquake_white.png" />
+    <None Remove="Resources\Icons\userquake_yellow.png" />
+    <None Remove="Resources\MapOverlays\description.png" />
+    <None Remove="Resources\MapOverlays\quake_note.png" />
+    <None Remove="Resources\MapOverlays\tsunami_note_advisory.png" />
+    <None Remove="Resources\MapOverlays\tsunami_note_majorwarning.png" />
+    <None Remove="Resources\MapOverlays\tsunami_note_warning.png" />
+    <None Remove="Resources\MapOverlays\userquake_note.png" />
+    <None Remove="Resources\Scales\scale_10.png" />
+    <None Remove="Resources\Scales\scale_20.png" />
+    <None Remove="Resources\Scales\scale_30.png" />
+    <None Remove="Resources\Scales\scale_40.png" />
+    <None Remove="Resources\Scales\scale_45.png" />
+    <None Remove="Resources\Scales\scale_46.png" />
+    <None Remove="Resources\Scales\scale_50.png" />
+    <None Remove="Resources\Scales\scale_55.png" />
+    <None Remove="Resources\Scales\scale_60.png" />
+    <None Remove="Resources\Scales\scale_70.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Resources\Examples\japan_1024.png" />
+    <Resource Include="Resources\Icons\eruption_black.png" />
+    <Resource Include="Resources\Icons\eruption_white.png" />
+    <Resource Include="Resources\Icons\tsunami_black.png" />
+    <Resource Include="Resources\Icons\tsunami_gray.png" />
+    <Resource Include="Resources\Icons\tsunami_red.png" />
+    <Resource Include="Resources\Icons\tsunami_white.png" />
+    <Resource Include="Resources\Icons\tsunami_yellow.png" />
+    <Resource Include="Resources\Icons\userquake.svg" />
+    <Resource Include="Resources\Icons\userquake_black.png" />
+    <Resource Include="Resources\Icons\userquake_gray.png" />
+    <Resource Include="Resources\Icons\userquake_red.png" />
+    <Resource Include="Resources\Icons\userquake_white.png" />
+    <Resource Include="Resources\Icons\userquake_yellow.png" />
+    <Resource Include="Resources\MapOverlays\description.png" />
+    <Resource Include="Resources\MapOverlays\quake_note.png" />
+    <Resource Include="Resources\MapOverlays\tsunami_note_advisory.png" />
+    <Resource Include="Resources\MapOverlays\tsunami_note_majorwarning.png" />
+    <Resource Include="Resources\MapOverlays\tsunami_note_warning.png" />
+    <Resource Include="Resources\MapOverlays\userquake_note.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Toolkit.Uwp.Notifications" Version="7.1.3" />
+    <PackageReference Include="ModernWpfUI" Version="0.9.6" />
+    <PackageReference Include="NAudio" Version="2.1.0" />
+    <PackageReference Include="Polly" Version="7.2.3" />
+    <PackageReference Include="Sentry" Version="3.29.1" />
+    <PackageReference Include="SharpVectors" Version="1.8.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Page Include="App.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Client\Client.csproj" />
+    <ProjectReference Include="..\IPC\IPC.csproj" />
+    <ProjectReference Include="..\JsonApi\JsonApi.csproj" />
+    <ProjectReference Include="..\Map\Map.csproj" />
+    <ProjectReference Include="..\Updater\Updater.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Resources\Icons\tsunami.svg" />
+    <Resource Include="Resources\Scales\scale_10.png" />
+    <Resource Include="Resources\Scales\scale_20.png" />
+    <Resource Include="Resources\Scales\scale_30.png" />
+    <Resource Include="Resources\Scales\scale_40.png" />
+    <Resource Include="Resources\Scales\scale_45.png" />
+    <Resource Include="Resources\Scales\scale_46.png" />
+    <Resource Include="Resources\Scales\scale_50.png" />
+    <Resource Include="Resources\Scales\scale_55.png" />
+    <Resource Include="Resources\Scales\scale_60.png" />
+    <Resource Include="Resources\Scales\scale_70.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Update="EEWVoice.Designer.cs">
+      <DesignTime>True</DesignTime>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>EEWVoice.resx</DependentUpon>
+    </Compile>
+    <Compile Update="License.Designer.cs">
+      <DesignTime>True</DesignTime>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>License.resx</DependentUpon>
+    </Compile>
+    <Compile Update="Resource.Designer.cs">
+      <DesignTime>True</DesignTime>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>Resource.resx</DependentUpon>
+    </Compile>
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Update="EEWVoice.resx">
+      <Generator>ResXFileCodeGenerator</Generator>
+      <LastGenOutput>EEWVoice.Designer.cs</LastGenOutput>
+    </EmbeddedResource>
+    <EmbeddedResource Update="License.resx">
+      <Generator>ResXFileCodeGenerator</Generator>
+      <LastGenOutput>License.Designer.cs</LastGenOutput>
+    </EmbeddedResource>
+    <EmbeddedResource Update="Resource.resx">
+      <Generator>ResXFileCodeGenerator</Generator>
+      <LastGenOutput>Resource.Designer.cs</LastGenOutput>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Resources\Sounds\EEW\" />
+    <Folder Include="Resources\Specifications\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Resources\Sounds\EEW_Beta.mp3">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Resources\Sounds\P2PQ_Snd0.mp3">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Resources\Sounds\P2PQ_Snd1.mp3">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Resources\Sounds\P2PQ_Snd2.mp3">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Resources\Sounds\P2PQ_Snd3.mp3">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Resources\Sounds\P2PQ_Snd4.mp3">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Resources\Sounds\P2PQ_Snd9.mp3">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Resources\Sounds\P2PQ_Sndt.mp3">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>

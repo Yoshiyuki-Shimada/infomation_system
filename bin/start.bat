@@ -4,6 +4,12 @@ cd /d %~dp0
 
 for %%i in ("%~dp0..") do set "PARENT_DIR=%%~fi"
 
+rem Refresh the official holiday cache before the displays select a timetable.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%PARENT_DIR%\bin\update_holidays.ps1"
+
+rem Permit the management screen from private LAN devices. Failure does not stop signage startup.
+netsh advfirewall firewall show rule name="Infomation System Control 18765" >nul 2>&1 || netsh advfirewall firewall add rule name="Infomation System Control 18765" dir=in action=allow protocol=TCP localport=18765 profile=private >nul 2>&1
+
 powershell -ExecutionPolicy Bypass -File "%PARENT_DIR%\bin\display_power_control.ps1" -WakeOnce
 
 wmic process where "commandline like '%%start_news_fetcher.ps1%%'" call terminate
@@ -14,6 +20,7 @@ wmic process where "commandline like '%%time_signal.ps1%%'" call terminate
 wmic process where "commandline like '%%network_check.ps1%%'" call terminate
 wmic process where "commandline like '%%display_power_control.ps1%%'" call terminate
 wmic process where "commandline like '%%earthquake_monitor.ps1%%'" call terminate
+wmic process where "name='EarthquakeSignageBridge.exe'" call terminate
 wmic process where "commandline like '%%play_eew_sequence.ps1%%'" call terminate
 
 rem Wait for the network and keep the news/weather/railway fetcher alive.

@@ -283,6 +283,9 @@ function Stop-SignageProcesses {
             Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
         }
 
+    Get-Process -Name "EarthquakeSignageBridge" -ErrorAction SilentlyContinue |
+        Stop-Process -Force -ErrorAction SilentlyContinue
+
     Get-CimInstance Win32_Process |
         Where-Object {
             $_.Name -eq "msedge.exe" -and

@@ -926,8 +926,8 @@ function createWeatherDataHtmlTomorrow(forecast) {
             <div class="slide-title">明日の天気（大阪府・気象庁）</div>
             <div class="slide-content">
                 <div class="weather_tomorrow">
-                    <img src="${getJmaWeatherIconPath(tomorrowCode, forecast.weatherText)}" class="weather_icon_tomorrow"><br>
-                    <span class="weather_name_tomorrow">${getJmaWeatherName(tomorrowCode, forecast.weatherText)}</span><br>
+                    <img src="${getJmaWeatherIconPath(tomorrowCode, forecast.weatherText)}" class="weather_icon_tomorrow">
+                    <div class="weather_name_tomorrow">${getJmaWeatherName(tomorrowCode, forecast.weatherText)}</div>
                     <span class="weather_temperature_tomorrow">
                         <span class="weather_temperature_max_tomorrow">
                             ${maximumTemperatureText}℃
@@ -1000,7 +1000,8 @@ function createWeeklyWeatherHtml(weeklyWeather) {
         .map((forecast) => {
             const date = new Date(`${forecast.date}T00:00:00`);
             const code = Number(forecast.weatherCode);
-            const dateText = `${date.getMonth() + 1}/${date.getDate()}（${weekdays[date.getDay()]}）`;
+            const monthDayText = `${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")}`;
+            const weekdayText = `（${weekdays[date.getDay()]}）`;
             const weatherName = getJmaWeatherName(code, forecast.weatherText);
             const maxTemperature =
                 forecast.temperatureMax == null
@@ -1022,7 +1023,10 @@ function createWeeklyWeatherHtml(weeklyWeather) {
 
             return `
                 <div class="weather_weekly_item">
-                    <div class="weather_weekly_date">${dateText}</div>
+                    <div class="weather_weekly_date">
+                        <span class="weather_weekly_month_day">${monthDayText}</span>
+                        <span class="weather_weekly_weekday">${weekdayText}</span>
+                    </div>
                     <img
                         src="${getJmaWeatherIconPath(code, forecast.weatherText)}"
                         class="weather_weekly_icon"
@@ -1071,6 +1075,16 @@ function formatDisasterTime(value) {
     return `${date.getMonth() + 1}月${date.getDate()}日${date.getHours()}時${String(date.getMinutes()).padStart(2, "0")}分`;
 }
 
+function formatEewIssueTime(value) {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return escapeDisasterHtml(value);
+
+    const dateText = `${date.getMonth() + 1}月${date.getDate()}日`;
+    const timeText = `${date.getHours()}時${String(date.getMinutes()).padStart(2, "0")}分`;
+    return `${dateText}<br>${timeText}`;
+}
+
 function formatDisasterTimeShort(value) {
     if (!value) return "";
     const date = new Date(value);
@@ -1078,35 +1092,50 @@ function formatDisasterTimeShort(value) {
     return `${date.getMonth() + 1}/${date.getDate()} ${date.getHours()}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
+function createDisasterMapHtml(data, altText) {
+    const fallbackImage = "earthquake/Map/Resources/Maps/japan-gsi_2048-8bit.png";
+    const imageSource = data?.mapImage || fallbackImage;
+    const loadingClass = data?.mapImage ? "" : " disaster-map-loading";
+    return `
+        <div class="disaster-map-panel${loadingClass}">
+            <img class="disaster-map-image" src="${escapeDisasterHtml(imageSource)}" alt="${escapeDisasterHtml(altText)}">
+            ${data?.mapImage ? "" : '<div class="disaster-map-status">地図を生成しています</div>'}
+        </div>
+    `;
+}
+
 function createEewHtml(eew) {
     if (!eew) return "";
     const areaItems = (eew.areas || [])
-        .slice(0, 12)
         .map(
             (area) => `
                 <div class="eew-area-item">
                     <span>${escapeDisasterHtml(area.pref || area.name)}</span>
-                    <strong>震度${escapeDisasterHtml(area.scaleText || "-")}</strong>
                 </div>
             `,
         )
         .join("");
     const title = eew.cancelled
         ? "緊急地震速報 取り消し"
-        : `緊急地震速報 第${escapeDisasterHtml(eew.serial || 1)}報`;
+        : eew.isFollowUp
+          ? "緊急地震速報 続報"
+          : "緊急地震速報";
 
     return `
         <div class="slide eew-slide">
             <div class="slide-title">${title}</div>
-            <div class="slide-content eew-content">
-                <div class="eew-main-title">${eew.cancelled ? "先ほどの緊急地震速報は取り消されました" : "強い揺れに警戒"}</div>
-                <div class="eew-detail-grid">
-                    <div><span>震源</span><strong>${escapeDisasterHtml(eew.hypocenter || "調査中")}</strong></div>
-                    <div><span>発表</span><strong>${formatDisasterTime(eew.issueTime)}</strong></div>
-                    <div><span>規模</span><strong>M${escapeDisasterHtml(eew.magnitude || "-")}</strong></div>
-                    <div><span>深さ</span><strong>${escapeDisasterHtml(eew.depth || "-")}km</strong></div>
+            <div class="slide-content disaster-content-grid eew-content">
+                <div class="disaster-detail-panel">
+                    <div class="eew-main-title">${eew.cancelled ? "先ほどの緊急地震速報は取り消されました" : "強い揺れに警戒"}</div>
+                    <div class="eew-detail-grid">
+                        <div><span>震源</span><strong>${escapeDisasterHtml(eew.hypocenter || "調査中")}</strong></div>
+                        <div><span>発表</span><strong>${formatEewIssueTime(eew.issueTime)}</strong></div>
+                        <div><span>規模</span><strong>${eew.magnitude ? `M${escapeDisasterHtml(eew.magnitude)}` : "調査中"}</strong></div>
+                        <div><span>深さ</span><strong>${eew.depth ? `${escapeDisasterHtml(eew.depth)}km` : "調査中"}</strong></div>
+                    </div>
+                    <div class="eew-area-list">${areaItems}</div>
                 </div>
-                <div class="eew-area-list">${areaItems}</div>
+                ${createDisasterMapHtml(eew, "緊急地震速報の対象地域地図")}
             </div>
         </div>
     `;
@@ -1129,11 +1158,14 @@ function createTsunamiHtml(tsunamiData = null) {
     return `
         <div class="slide tsunami-slide">
             <div class="slide-title">津波情報発表中</div>
-            <div class="slide-content tsunami-detail">
-                <div class="tsunami-lead">海岸や川の河口付近から離れてください</div>
-                <div class="tsunami-detail-list">
-                    ${areaItems || "<div class=\"tsunami-area-item\">津波情報が発表されています。テレビやラジオの情報に注意してください。</div>"}
+            <div class="slide-content disaster-content-grid tsunami-detail">
+                <div class="disaster-detail-panel">
+                    <div class="tsunami-lead">海岸や川の河口付近から離れてください</div>
+                    <div class="tsunami-detail-list">
+                        ${areaItems || "<div class=\"tsunami-area-item\">津波情報が発表されています。テレビやラジオの情報に注意してください。</div>"}
+                    </div>
                 </div>
+                ${createDisasterMapHtml(tsunamiData, "津波情報の対象沿岸地図")}
             </div>
         </div>
     `;
@@ -1209,21 +1241,40 @@ function createEarthquakeIntensityGroupsHtml(q) {
 function createEarthquakeHtml(q) {
     if (!q) return "";
     const bgClass = q.maxScale >= 60 ? "bg-red" : q.maxScale >= 45 ? "bg-yellow" : "bg-cyan";
+    const informationType = q.informationType || "Detail";
+    const isScalePrompt = informationType === "ScalePrompt";
+    const isHypocenterReport = informationType === "Destination";
+    const hasIntensityDetails = ["ScalePrompt", "ScaleAndDestination", "Detail"].includes(informationType);
     const intensityGroupsHtml = createEarthquakeIntensityGroupsHtml(q);
+    const occurredAt = formatDisasterTime(q.time);
+    let summaryHtml = `${occurredAt}頃、地震がありました。<br>最大震度は${escapeDisasterHtml(q.maxScaleText || "-")}です。`;
+    if (isHypocenterReport) {
+        summaryHtml = `${occurredAt}頃、${escapeDisasterHtml(q.hypocenter || "不明")}を震源とする地震がありました。`;
+    } else if (!isScalePrompt) {
+        summaryHtml = `${occurredAt}頃、${escapeDisasterHtml(q.hypocenter || "不明")}で地震がありました。<br>最大震度は${escapeDisasterHtml(q.maxScaleText || "-")}です。`;
+    }
+    const hypocenterDetailHtml = isScalePrompt
+        ? ""
+        : `<div class="quake-summary-sub">M${escapeDisasterHtml(q.magnitude || "-")}　震源地 ${escapeDisasterHtml(q.hypocenter || "不明")}　深さ ${escapeDisasterHtml(q.depth || "-")}km　津波 ${escapeDisasterHtml(q.tsunami || "-")}</div>`;
+    const intensityListHtml = hasIntensityDetails && intensityGroupsHtml
+        ? `<div class="auto-scroll-viewport earthquake-points-viewport"><div class="auto-scroll-content earthquake-points-scroll"><div class="earthquake-intensity-groups">${intensityGroupsHtml}</div></div></div>`
+        : "";
+    const ikunoHtml = ["ScaleAndDestination", "Detail"].includes(informationType)
+        ? `<div class="ikuno-intensity"><span>大阪市生野区</span><strong>${q.ikunoScale >= 30 ? `震度${escapeDisasterHtml(q.ikunoScaleText)}` : "震度情報なし"}</strong></div>`
+        : "";
 
     return `
         <div class="slide earthquake-slide ${bgClass}">
-            <div class="slide-title">地震情報</div>
-            <div class="slide-content earthquake-detail earthquake-fixed-layout">
-                <div class="quake-summary-main">
-                    ${formatDisasterTime(q.time)}頃、${escapeDisasterHtml(q.hypocenter || "不明")}で地震がありました。<br>
-                    最大震度は${escapeDisasterHtml(q.maxScaleText || "-")}です。
+            <div class="slide-title">${escapeDisasterHtml(q.informationTitle || "地震情報")}</div>
+            <div class="slide-content disaster-content-grid earthquake-detail earthquake-fixed-layout">
+                <div class="disaster-detail-panel">
+                    <div class="quake-summary-main">${summaryHtml}</div>
+                    ${hypocenterDetailHtml}
+                    ${intensityListHtml}
                 </div>
-                <div class="quake-summary-sub">M${escapeDisasterHtml(q.magnitude || "-")}　深さ ${escapeDisasterHtml(q.depth || "-")}km　津波 ${escapeDisasterHtml(q.tsunami || "-")}</div>
-                <div class="auto-scroll-viewport earthquake-points-viewport">
-                    <div class="auto-scroll-content earthquake-points-scroll">
-                        <div class="earthquake-intensity-groups">${intensityGroupsHtml}</div>
-                    </div>
+                <div class="earthquake-map-column">
+                    ${createDisasterMapHtml(q, "震源と震度分布の地図")}
+                    ${ikunoHtml}
                 </div>
             </div>
         </div>
@@ -1264,10 +1315,16 @@ function createRailwayDisasterTickerHtml(railwayItems = []) {
     `;
 }
 
-function createDisasterPriorityHtml(emergencyData, railwayItems = []) {
+function createDisasterPriorityHtml(emergencyData, railwayItems = [], kind = "") {
     if (!emergencyData) return "";
     let mainHtml = "";
-    if (emergencyData.eew) {
+    if (kind === "eew" && emergencyData.eew) {
+        mainHtml = createEewHtml(emergencyData.eew).replace('<div class="slide eew-slide">', '<div class="disaster-main-inner eew-slide">').replace('</div>\n    ', '</div>\n    ');
+    } else if (kind === "tsunami" && emergencyData.tsunami?.active) {
+        mainHtml = createTsunamiHtml(emergencyData.tsunami).replace('<div class="slide tsunami-slide">', '<div class="disaster-main-inner tsunami-slide">');
+    } else if (kind === "earthquake" && emergencyData.earthquake) {
+        mainHtml = createEarthquakeHtml(emergencyData.earthquake).replace('<div class="slide earthquake-slide ', '<div class="disaster-main-inner earthquake-slide ');
+    } else if (emergencyData.eew) {
         mainHtml = createEewHtml(emergencyData.eew).replace('<div class="slide eew-slide">', '<div class="disaster-main-inner eew-slide">').replace('</div>\n    ', '</div>\n    ');
     } else if (emergencyData.tsunami?.active) {
         mainHtml = createTsunamiHtml(emergencyData.tsunami).replace('<div class="slide tsunami-slide">', '<div class="disaster-main-inner tsunami-slide">');
@@ -1280,7 +1337,6 @@ function createDisasterPriorityHtml(emergencyData, railwayItems = []) {
             <div class="disaster-main-area">
                 ${mainHtml}
             </div>
-            ${createRailwayDisasterTickerHtml(railwayItems)}
         </div>
     `;
 }

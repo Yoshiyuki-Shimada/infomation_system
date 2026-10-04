@@ -7,30 +7,6 @@ const engVisible = {
     bus_msg: 5,
 };
 const OBON_SATURDAY_DATE_KEYS = ["2026-08-13", "2026-08-14"];
-const HOLIDAY_DATE_KEYS_2026 = new Set([
-    "2026-01-01",
-    "2026-01-02",
-    "2026-01-03",
-    "2026-01-12",
-    "2026-02-11",
-    "2026-02-23",
-    "2026-03-20",
-    "2026-04-29",
-    "2026-05-03",
-    "2026-05-04",
-    "2026-05-05",
-    "2026-05-06",
-    "2026-07-20",
-    "2026-08-11",
-    "2026-09-21",
-    "2026-09-22",
-    "2026-09-23",
-    "2026-10-12",
-    "2026-11-03",
-    "2026-11-23",
-    "2026-12-30",
-    "2026-12-31",
-]);
 const busDeveloperState = {
     characterMode: "random",
     testOverride: null,
@@ -57,18 +33,29 @@ const transferGuideMessages = {
     "13_南": "JR環状線は、「寺田町駅前」で。地下鉄御堂筋線・谷町線・JR阪和線・JR大和路線・近鉄南大阪線・阪堺上町線は、「あべの橋」でお乗り換えください。",
 };
 
-/**
- * 日本の祝日判定ロジック (2026年)
- */
+/** 日本の祝日判定。内閣府データは holiday-loader.js が読み込む。 */
 function isJapaneseHoliday(date) {
-    // 日曜と、振替休日・国民の休日を含む2026年の休日を休日ダイヤにする。
-    return date.getDay() === 0 || HOLIDAY_DATE_KEYS_2026.has(formatDateKey(date));
+    const holidays =
+        typeof getJapaneseHolidayMap === "function"
+            ? getJapaneseHolidayMap()
+            : {};
+    return (
+        date.getDay() === 0 ||
+        Object.prototype.hasOwnProperty.call(holidays, formatDateKey(date))
+    );
 }
 
 /**
  * 指定された日付からダイヤの種類を判定する
  */
 function getScheduleType(date) {
+    const forcedType =
+        typeof getInformationControlFallbackScheduleType === "function"
+            ? getInformationControlFallbackScheduleType()
+            : "auto";
+    if (["weekday", "saturday", "holiday"].includes(forcedType)) {
+        return forcedType;
+    }
     if (OBON_SATURDAY_DATE_KEYS.includes(formatDateKey(date))) return "saturday";
     if (isJapaneseHoliday(date)) return "holiday";
     if (date.getDay() === 6) return "saturday";
@@ -451,14 +438,24 @@ function refresh() {
               ...onlineSchedule,
           }
         : displaySchedule.schedule;
-    const schedule = applyBusDeveloperOverrides(sourceSchedule, now);
+    const developerSchedule = applyBusDeveloperOverrides(sourceSchedule, now);
+    const schedule =
+        typeof applyInformationControlBusTests === "function"
+            ? applyInformationControlBusTests(developerSchedule, "general", now)
+            : developerSchedule;
 
     const onlineUpdateTime = onlineFetchedAt
         ? `${String(onlineFetchedAt.getHours()).padStart(2, "0")}:${String(onlineFetchedAt.getMinutes()).padStart(2, "0")}`
         : "";
     const isOutsideOnlineServiceHours =
         now.getHours() >= 1 && now.getHours() < 5;
-    document.getElementById("debug-mode").textContent = isBusDeveloperMode()
+    const isControlTest =
+        typeof isInformationControlTestActive === "function" &&
+        isInformationControlTestActive(now);
+    const debugMode = document.getElementById("debug-mode");
+    debugMode.textContent = isControlTest
+        ? "● 試験中"
+        : isBusDeveloperMode()
         ? "● 開発者モード（" + busDeveloperState.lastCommand + "）"
         : isOutsideOnlineServiceHours
           ? "● オンラインデータ（情報提供時間外）"
@@ -469,6 +466,7 @@ function refresh() {
               onlinePollIntervalSeconds +
               "秒間隔更新）"
             : "● " + displaySchedule.name;
+    debugMode.classList.toggle("information-control-test-banner", isControlTest);
     const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
     const days = ["日", "月", "火", "水", "木", "金", "土"];
     const dateStr = `${now.getFullYear()}年${String(now.getMonth() + 1).padStart(2, "0")}月${String(now.getDate()).padStart(2, "0")}日（${days[now.getDay()]}）`;
@@ -503,19 +501,28 @@ function refresh() {
 
     updateTransferGuide(
         "transfer-guide-oikebashi",
-        getTransferGuidePagingBuses(schedule.oikebashi || [], now, opDate, 3),
+        typeof getInformationControlDisplayOverride === "function" &&
+        getInformationControlDisplayOverride("list-oikebashi", now)
+            ? []
+            : getTransferGuidePagingBuses(schedule.oikebashi || [], now, opDate, 3),
         now,
         opDate,
     );
     updateTransferGuide(
         "transfer-guide-kumata",
-        getTransferGuidePagingBuses(schedule.kumata || [], now, opDate, 2),
+        typeof getInformationControlDisplayOverride === "function" &&
+        getInformationControlDisplayOverride("list-kumata", now)
+            ? []
+            : getTransferGuidePagingBuses(schedule.kumata || [], now, opDate, 2),
         now,
         opDate,
     );
     updateTransferGuide(
         "transfer-guide-abenobashi",
-        getTransferGuidePagingBuses(schedule.abenobashi || [], now, opDate, 2),
+        typeof getInformationControlDisplayOverride === "function" &&
+        getInformationControlDisplayOverride("list-abenobashi", now)
+            ? []
+            : getTransferGuidePagingBuses(schedule.abenobashi || [], now, opDate, 2),
         now,
         opDate,
     );
@@ -740,6 +747,17 @@ function getBusDelayIconName(
     }
 
     return "";
+}
+
+// 大幅な遅延がある便は、定刻が諦めましょうの時間帯に入ったら
+// 定刻基準の残り時間を表示しない。予測時刻基準の「まもなく」は別途判定する。
+function shouldHideDelayedBusCountdown(bus, scheduledSeconds) {
+    return (
+        bus.onlineFlg &&
+        Number(bus.delayMinutes) >= 5 &&
+        !!getBusDelayBaseTime(bus) &&
+        scheduledSeconds <= 4 * 60 + 30
+    );
 }
 
 function normalizeBusDeveloperTime(value) {
@@ -1015,6 +1033,30 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
     const el = document.getElementById(id);
     if (!el) return [];
     const pageEl = document.getElementById(id.replace("list-", "page-"));
+    const overrideHtml =
+        typeof getInformationControlOverrideHtml === "function"
+            ? getInformationControlOverrideHtml(id, now)
+            : "";
+    if (overrideHtml) {
+        el.innerHTML = overrideHtml;
+        if (pageEl) pageEl.textContent = "";
+        return [];
+    }
+
+    const section = id.replace("list-", "");
+    const scheduleType = getScheduleType(opDate);
+    if (
+        typeof isInformationControlTimetableMissing === "function" &&
+        isInformationControlTimetableMissing(section, scheduleType)
+    ) {
+        el.innerHTML = `
+            <div class="no-bus information-control-override">
+                <div class="no-bus-ja">調整中</div>
+            </div>
+        `;
+        if (pageEl) pageEl.textContent = "";
+        return [];
+    }
 
     const lifecycleBuses = getBusesWithRemovalGrace(
         id,
@@ -1124,6 +1166,8 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
                 "発車情報未検出",
             ].includes(startDepartureStatus?.text);
             const delayIconControlsProgress = delayIconName === "delay.png";
+            const hideDelayedGiveUpCountdown =
+                shouldHideDelayedBusCountdown(bus, diff_sec_pure);
             const showSoon =
                 delayIconControlsProgress &&
                 !isStartDepartureUndetectedStatus &&
@@ -1164,6 +1208,7 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
                 diff_sec_pure >= 0 &&
                 diff_sec_pure < 3600 &&
                 !delayIconControlsProgress &&
+                !hideDelayedGiveUpCountdown &&
                 remainingResult
                     ? {
                           text: remainingResult.text,
@@ -1279,7 +1324,9 @@ function renderBusList(id, buses, now, opDate, maxDisplay) {
 }
 
 function getTransferGuideMessage(bus) {
-    return transferGuideMessages[`${bus.line}_${bus.dir}`] || "";
+    const route = routeMaster[`${bus.line}_${bus.dir}`] || {};
+    const managedMessage = [route.msg1, route.msg2].filter(Boolean).join("");
+    return managedMessage || transferGuideMessages[`${bus.line}_${bus.dir}`] || "";
 }
 
 function createTransferGuideText(bus) {

@@ -444,9 +444,17 @@
 
 /** 明日の天気の名称 */
 .weather_name_tomorrow {
-    font-size: 3.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: min(90%, 900px);
+    min-height: 2.4em;
+    margin: 8px auto 0;
+    font-size: 2.8rem;
     font-weight: bold;
     color: var(--snow-white);
+    line-height: 1.15;
+    overflow-wrap: anywhere;
 }
 
 /** 明日の気温 */
@@ -491,6 +499,9 @@
 }
 
 .weather_weekly_item {
+    display: grid;
+    grid-template-rows: 2.8rem 98px 3.2rem 2rem 1.8rem minmax(2.2rem, auto);
+    align-items: center;
     min-width: 0;
     padding: 18px 8px;
     text-align: center;
@@ -499,26 +510,42 @@
 }
 
 .weather_weekly_date {
-    font-size: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.15rem;
     font-weight: bold;
+    line-height: 1.15;
+    white-space: nowrap;
+}
+
+.weather_weekly_month_day,
+.weather_weekly_weekday {
+    display: block;
 }
 
 .weather_weekly_icon {
     display: block;
     width: 92px;
     height: 92px;
-    margin: 18px auto 10px;
+    margin: 3px auto;
 }
 
 .weather_weekly_name {
-    min-height: 2.5em;
-    font-size: 1.1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    height: 3.2rem;
+    font-size: 1rem;
     font-weight: bold;
-    line-height: 1.25;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
 }
 
 .weather_weekly_temperature {
-    margin-top: 16px;
+    margin-top: 0;
     font-size: 1.25rem;
     font-weight: bold;
 }
@@ -538,7 +565,7 @@
 }
 
 .weather_weekly_precipitation {
-    margin-top: 12px;
+    margin-top: 0;
     font-size: 1rem;
     font-weight: bold;
 }
@@ -695,27 +722,112 @@
 .tsunami-slide,
 .earthquake-slide,
 .disaster-main-inner {
-    color: #fff;
+    color: #111;
+    background: #fff;
+}
+
+.earthquake-slide .quake-scale-heading {
+    color: #8a2500;
+}
+
+.earthquake-slide .quake-pref-line span {
+    color: #004f3d;
 }
 
 .eew-slide {
-    background: #b00020;
+    border-top: 10px solid #c40024;
 }
 
 .tsunami-slide {
-    background: #7a2dff;
+    border-top: 10px solid #6d1bb1;
 }
 
 .eew-content,
 .tsunami-detail,
 .earthquake-detail {
-    gap: 18px;
+    gap: 20px;
+}
+
+.disaster-content-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+    min-height: 0;
+}
+
+.disaster-detail-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.disaster-map-panel {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    background: #eaf1fb;
+    border: 2px solid #8796a8;
+}
+
+.disaster-map-image {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    background: #8ea9db;
+}
+
+.disaster-map-status {
+    position: absolute;
+    right: 12px;
+    bottom: 12px;
+    padding: 7px 12px;
+    color: #111;
+    background: rgba(255, 255, 255, 0.9);
+    border: 1px solid #657489;
+    font-size: 0.95rem;
+    font-weight: bold;
+}
+
+.earthquake-map-column {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto;
+    min-width: 0;
+    min-height: 0;
+}
+
+.earthquake-map-column .disaster-map-panel {
+    min-height: 0;
+}
+
+.ikuno-intensity {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    padding: 10px 14px;
+    color: #111;
+    background: #fff;
+    border: 1px solid #657489;
+    border-top: 0;
+    font-size: 1.1rem;
+}
+
+.ikuno-intensity strong {
+    color: #b00020;
+    font-size: 1.35rem;
 }
 
 .eew-main-title,
 .tsunami-lead,
 .quake-summary-main {
-    font-size: 2.4rem;
+    color: #b00020;
+    font-size: 2rem;
     font-weight: bold;
     line-height: 1.25;
 }
@@ -727,14 +839,14 @@
 }
 
 .eew-detail-grid > div {
-    padding: 14px 18px;
-    background: rgba(0, 0, 0, 0.22);
-    border: 1px solid rgba(255, 255, 255, 0.28);
+    padding: 12px 15px;
+    background: #f3f5f7;
+    border: 1px solid #aab3bd;
 }
 
 .eew-detail-grid span {
     display: block;
-    color: rgba(255, 255, 255, 0.75);
+    color: #485360;
     font-size: 1rem;
 }
 
@@ -754,13 +866,21 @@
     overflow: hidden;
 }
 
+.eew-area-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    align-content: start;
+}
+
 .eew-area-item,
 .quake-point-item,
 .tsunami-area-item {
-    padding: 12px 16px;
-    background: rgba(0, 0, 0, 0.24);
-    border-left: 8px solid var(--sky-yellow);
-    font-size: 1.2rem;
+    padding: 10px 13px;
+    color: #111;
+    background: #f3f5f7;
+    border: 1px solid #b2bbc4;
+    border-left: 8px solid #d40025;
+    font-size: 1.08rem;
     font-weight: bold;
 }
 
@@ -771,9 +891,23 @@
     gap: 10px;
 }
 
+.eew-area-item {
+    justify-content: flex-start;
+    min-width: 0;
+    padding: 6px 8px;
+    border-left-width: 5px;
+    font-size: 0.92rem;
+    line-height: 1.25;
+}
+
+.eew-area-item span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
 .eew-area-item strong,
 .quake-point-item span {
-    color: var(--sky-yellow);
+    color: #b00020;
 }
 
 .tsunami-area-name {
@@ -783,26 +917,26 @@
 
 .tsunami-area-grade {
     margin-top: 5px;
-    color: var(--sky-yellow);
+    color: #b00020;
     font-size: 1.15rem;
     font-weight: bold;
 }
 
 .tsunami-area-meta,
 .quake-summary-sub {
-    color: rgba(255, 255, 255, 0.86);
-    font-size: 1.25rem;
+    color: #303840;
+    font-size: 1.12rem;
     font-weight: bold;
 }
 
 .disaster-priority-slide {
     padding: 0;
-    background: #000;
+    background: #fff;
 }
 
 .disaster-main-area {
     position: absolute;
-    inset: 0 0 86px 0;
+    inset: 0;
     overflow: hidden;
 }
 
@@ -811,7 +945,7 @@
     inset: 0;
     display: flex;
     flex-direction: column;
-    padding: 30px;
+    padding: 22px;
     box-sizing: border-box;
     overflow: hidden;
 }

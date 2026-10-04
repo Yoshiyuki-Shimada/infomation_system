@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="ja">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>インフォメーションシステム管理</title>
+        <link rel="stylesheet" href="/infomation_control/control.css" />
+    </head>
+    <body>
+        <header class="topbar">
+            <div>
+                <h1>インフォメーションシステム管理</h1>
+                <p id="connection-status">接続確認中</p>
+            </div>
+            <button id="refresh-button" type="button">更新</button>
+        </header>
+
+        <nav class="tabs" aria-label="管理機能">
+            <button class="tab is-active" data-tab="tests">テスト</button>
+            <button class="tab" data-tab="display">表示制御</button>
+            <button class="tab" data-tab="timetable">時刻表</button>
+            <button class="tab" data-tab="routes">路線マスタ</button>
+            <button class="tab" data-tab="signal">時報</button>
+            <button class="tab" data-tab="network">ログ</button>
+        </nav>
+
+        <main>
+            <section class="panel is-active" id="panel-tests">
+                <h2>災害情報テスト</h2>
+                <div class="disaster-test-grid">
+                    <section class="control-block">
+                        <h3>緊急地震速報</h3>
+                        <label>震源<input id="eew-hypocenter" value="大阪府" /></label>
+                        <label>警報地点（カンマまたは改行区切り）
+                            <textarea id="eew-areas">大阪、兵庫、京都、奈良</textarea>
+                        </label>
+                        <button data-disaster-test="eew">テスト送信</button>
+                    </section>
+                    <section class="control-block">
+                        <h3>地震情報</h3>
+                        <label>震源<input id="quake-hypocenter" value="大阪府北部" /></label>
+                        <div id="quake-test-points" class="test-point-list"></div>
+                        <button id="add-quake-point" class="secondary" type="button">観測点を追加</button>
+                        <button data-disaster-test="earthquake">テスト送信</button>
+                    </section>
+                    <section class="control-block">
+                        <h3>津波情報</h3>
+                        <div id="tsunami-test-areas" class="test-point-list"></div>
+                        <button id="add-tsunami-area" class="secondary" type="button">予報区を追加</button>
+                        <button data-disaster-test="tsunami">テスト送信</button>
+                    </section>
+                </div>
+                <div class="command-row"><button class="secondary" data-disaster-test="clear">テスト解除</button></div>
+
+                <h2>バス表示テスト</h2>
+                <form id="bus-test-form" class="form-grid">
+                    <label>表示画面
+                        <select name="surface">
+                            <option value="general">田島三丁目・一般路線バス</option>
+                            <option value="liner">いまざとライナー</option>
+                        </select>
+                    </label>
+                    <label>方面キー<input name="section" placeholder="oikebashi" required /></label>
+                    <label>発車時刻<input name="time" type="time" required /></label>
+                    <label>系統番号<input name="line" placeholder="35 / BRT1" required /></label>
+                    <label>テスト内容
+                        <select name="type">
+                            <option value="delay">遅延</option>
+                            <option value="suspension">運休</option>
+                            <option value="departure-delay">始発発車遅れ見込み</option>
+                            <option value="location-error">始発発車未検知</option>
+                            <option value="departure-not-detected">発車情報未検出</option>
+                        </select>
+                    </label>
+                    <label>遅延分<input name="delayMinutes" type="number" min="1" max="180" value="15" /></label>
+                    <label>有効期限<input name="expiresAt" type="datetime-local" required /></label>
+                    <button type="submit">テスト開始</button>
+                    <button id="clear-bus-tests" class="secondary" type="button">バステスト解除</button>
+                </form>
+                <div id="active-tests" class="data-list"></div>
+            </section>
+
+            <section class="panel" id="panel-display">
+                <h2>方面別表示制御</h2>
+                <form id="display-form" class="form-grid">
+                    <label>表示箇所
+                        <select name="targetId">
+                            <option value="list-oikebashi">【一般】大池橋方向</option>
+                            <option value="list-kumata">【一般】杭全方向</option>
+                            <option value="list-abenobashi">【一般】舎利寺・あべの橋方向</option>
+                            <option value="list-oikebashi-north">【いまざとライナー】大池橋・今里方向</option>
+                            <option value="list-oikebashi-south">【いまざとライナー】大池橋・杭全方向</option>
+                            <option value="list-tajima-north">【いまざとライナー】田島五丁目・今里方向</option>
+                            <option value="list-tajima-south">【いまざとライナー】田島五丁目・杭全方向</option>
+                        </select>
+                    </label>
+                    <label>表示
+                        <select name="status">
+                            <option value="運行停止中">運行停止中</option>
+                            <option value="停留所休止中">停留所休止中</option>
+                            <option value="調整中">調整中</option>
+                            <option value="試験中">試験中</option>
+                            <option value="normal">通常表示へ復帰</option>
+                        </select>
+                    </label>
+                    <label>有効期限<input name="expiresAt" type="datetime-local" required /></label>
+                    <button type="submit">適用</button>
+                </form>
+                <div id="active-overrides" class="data-list"></div>
+
+                <h2>フォールバックダイヤ</h2>
+                <div class="command-row">
+                    <select id="fallback-schedule">
+                        <option value="auto">本日の曜日に合わせる</option>
+                        <option value="weekday">平日</option>
+                        <option value="saturday">土曜</option>
+                        <option value="holiday">休日</option>
+                    </select>
+                    <button id="save-fallback">設定</button>
+                </div>
+            </section>
+
+            <section class="panel" id="panel-timetable">
+                <h2>時刻表データ</h2>
+                <p>停留所・ダイヤ・方面を選択してから、表示または自動取得してください。</p>
+                <form id="timetable-filter-form" class="form-grid timetable-filter-form">
+                    <label>停留所
+                        <select id="timetable-stop">
+                            <option value="tajima">田島三丁目</option>
+                            <option value="oikebashi">大池橋</option>
+                            <option value="tajima5">田島五丁目</option>
+                        </select>
+                    </label>
+                    <label>ダイヤ
+                        <select id="timetable-schedule-type"><option value="weekday">平日</option><option value="saturday">土曜</option><option value="holiday">休日</option></select>
+                    </label>
+                    <label>方面
+                        <select id="timetable-section">
+                            <option value="oikebashi" data-stop-key="tajima">【一般】大池橋方向</option>
+                            <option value="kumata" data-stop-key="tajima">【一般】杭全方向</option>
+                            <option value="abenobashi" data-stop-key="tajima">【一般】舎利寺・あべの橋方向</option>
+                            <option value="oikebashiNorth" data-stop-key="oikebashi">【いまざとライナー】大池橋・今里方向</option>
+                            <option value="oikebashiSouth" data-stop-key="oikebashi">【いまざとライナー】大池橋・杭全方向</option>
+                            <option value="tajimaNorth" data-stop-key="tajima5">【いまざとライナー】田島五丁目・今里方向</option>
+                            <option value="tajimaSouth" data-stop-key="tajima5">【いまざとライナー】田島五丁目・杭全方向</option>
+                        </select>
+                    </label>
+                    <button type="submit">表示</button>
+                    <button id="import-timetable" type="button" class="secondary">自動取得</button>
+                </form>
+                <div id="timetable-workspace" hidden>
+                    <h2 id="timetable-selection-title">選択中の時刻表</h2>
+                    <form id="timetable-form" class="form-grid timetable-entry-form">
+                        <input name="id" type="hidden" />
+                        <input name="stopKey" type="hidden" />
+                        <input name="scheduleType" type="hidden" />
+                        <input name="section" type="hidden" />
+                        <label>発車時刻<input name="departureTime" type="time" required /></label>
+                        <label>路線<select name="routeId" id="timetable-route" required></select></label>
+                        <label class="check-label"><input name="lastFlag" type="checkbox" />最終便</label>
+                        <button type="submit">登録・更新</button>
+                        <button type="reset" class="secondary">入力をクリア</button>
+                    </form>
+                    <p id="timetable-summary"></p>
+                    <div class="command-row">
+                        <button id="delete-selected-timetable" class="danger" type="button">選択削除</button>
+                        <button id="delete-all-timetable" class="danger" type="button">表示中を一括削除</button>
+                    </div>
+                    <div class="table-wrap"><table><thead><tr><th><input id="select-all-timetable" type="checkbox" aria-label="すべて選択" /></th><th>時刻</th><th>系統</th><th>行先</th><th>最終</th><th>操作</th></tr></thead><tbody id="timetable-body"></tbody></table></div>
+                </div>
+            </section>
+
+            <section class="panel" id="panel-routes">
+                <h2>路線マスタ</h2>
+                <form id="route-form" class="form-grid route-form">
+                    <label>系統ID<input name="id" placeholder="35_北" required /></label>
+                    <label>系統番号<input name="line" placeholder="35" required /></label>
+                    <label>方向<input name="direction" placeholder="北" required /></label>
+                    <label>行先<input name="destination" required /></label>
+                    <label>経由地<input name="via" /></label>
+                    <label>英語行先<input name="destinationEng" /></label>
+                    <label>英語経由地<input name="viaEng" /></label>
+                    <label>ひらがな行先<input name="destinationKana" /></label>
+                    <label class="wide">スクロール表示する乗換案内<textarea name="transferGuide" placeholder="地下鉄千日前線・今里筋線は「地下鉄今里」でお乗り換えください。"></textarea></label>
+                    <label class="wide">いまざとライナー停車停留所<textarea name="linerStops" placeholder="中川西公園前、地下鉄今里、神路公園"></textarea></label>
+                    <button type="submit">登録・更新</button>
+                    <button type="reset" class="secondary">入力をクリア</button>
+                </form>
+                <div class="table-wrap"><table><thead><tr><th>ID</th><th>系統</th><th>方向</th><th>行先</th><th>経由地</th><th>乗換案内</th><th>停車停留所</th><th>操作</th></tr></thead><tbody id="route-body"></tbody></table></div>
+            </section>
+
+            <section class="panel" id="panel-signal">
+                <h2>時報一時停止</h2>
+                <p id="time-signal-status">状態確認中</p>
+                <div class="command-row">
+                    <label>停止終了日時<input id="pause-until" type="datetime-local" /></label>
+                    <button id="pause-signal">指定時刻まで停止</button>
+                    <button id="resume-signal" class="secondary">今すぐ解除</button>
+                </div>
+            </section>
+
+            <section class="panel" id="panel-network">
+                <h2>ログ確認</h2>
+                <div class="command-row">
+                    <label>ログ種別<select id="log-type"><option value="network">ネットワーク</option><option value="earthquake">地震情報</option><option value="api">APIエラー</option></select></label>
+                    <label>詳細種別<select id="log-subtype"></select></label>
+                    <select id="network-target"><option value="">すべて</option></select>
+                    <label>結果<select id="network-result"><option value="">すべて</option><option value="OK">OK</option><option value="タイムアウト">タイムアウト</option><option value="オフライン">オフライン</option><option value="一般エラー">一般エラー</option><option value="宛先到達不能">宛先到達不能</option></select></label>
+                    <select id="network-order"><option value="desc">降順</option><option value="asc">昇順</option></select>
+                    <button id="load-network">表示</button>
+                </div>
+                <p id="network-summary"></p>
+                <div class="table-wrap"><table><thead id="log-table-head"><tr><th>日時</th><th>対象</th><th>結果</th><th>応答</th><th>品質</th><th>詳細</th></tr></thead><tbody id="network-body"></tbody></table></div>
+            </section>
+        </main>
+
+        <div id="toast" role="status" aria-live="polite"></div>
+        <script src="/infomation_control/control.js"></script>
+    </body>
+</html>

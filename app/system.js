@@ -37,7 +37,9 @@ scheduleLoadPromise
 function startInformationDataUpdates() {
     updateSignageWithRetryLogging();
     fetchNewData();
+    refreshEarthquakeDataFast();
     setInterval(fetchNewData, 1000);
+    setInterval(refreshEarthquakeDataFast, 250);
 }
 
 // 画像などのload完了を待たず、DOM構築直後から情報取得を開始する。

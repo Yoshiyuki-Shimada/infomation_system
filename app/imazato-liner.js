@@ -546,14 +546,18 @@ function registerImazatoLinerHtml(payload) {
 }
 function getImazatoLinerSchedule(now = new Date()) {
     if (!imazatoLinerState.fetchedAt || !imazatoLinerState.schedule) {
-        return null;
+        return typeof getInformationControlLinerFallbackSchedule === "function"
+            ? getInformationControlLinerFallbackSchedule(now)
+            : null;
     }
     const maxAgeMs = Math.max(
         IMAZATO_LINER_MAX_AGE_MS,
         imazatoLinerState.pollIntervalMs + 120000,
     );
     if (now - imazatoLinerState.fetchedAt > maxAgeMs) {
-        return null;
+        return typeof getInformationControlLinerFallbackSchedule === "function"
+            ? getInformationControlLinerFallbackSchedule(now)
+            : null;
     }
     return imazatoLinerState.schedule;
 }
@@ -1160,6 +1164,14 @@ function getImazatoLinerPagingWindow(activeBuses, now) {
 function renderImazatoLinerList(elementId, buses, now) {
     const element = document.getElementById(elementId);
     if (!element) return [];
+    const overrideHtml =
+        typeof getInformationControlOverrideHtml === "function"
+            ? getInformationControlOverrideHtml(elementId, now)
+            : "";
+    if (overrideHtml) {
+        element.innerHTML = overrideHtml;
+        return [];
+    }
 
     const lifecycleBuses = getImazatoLinerBusesWithRemovalGrace(
         elementId,
@@ -1298,6 +1310,15 @@ function getImazatoLinerGuideTargetBuses(stopKey, buses, now) {
 function updateImazatoLinerGuide(elementId, stopKey, buses, now) {
     const guideElement = document.getElementById(elementId);
     if (!guideElement) return;
+    const listId = elementId.replace("liner-guide-", "list-");
+    if (
+        typeof getInformationControlDisplayOverride === "function" &&
+        getInformationControlDisplayOverride(listId, now)
+    ) {
+        guideElement.dataset.guideText = "";
+        guideElement.innerHTML = "";
+        return;
+    }
 
     const guideBuses = getImazatoLinerGuideTargetBuses(stopKey, buses, now);
     const guideText = guideBuses
@@ -1441,8 +1462,8 @@ function refreshImazatoLinerDisplay() {
         return;
     }
 
-    const schedule = getImazatoLinerSchedule(now);
-    if (!schedule) {
+    const sourceSchedule = getImazatoLinerSchedule(now);
+    if (!sourceSchedule) {
         showImazatoLinerAdjusting();
         if (isOutsideOnlineServiceHours) {
             document
@@ -1454,14 +1475,31 @@ function refreshImazatoLinerDisplay() {
         }
         return;
     }
+    const schedule =
+        typeof applyInformationControlBusTests === "function"
+            ? applyInformationControlBusTests(sourceSchedule, "liner", now)
+            : sourceSchedule;
 
     const fetchedAt = imazatoLinerState.fetchedAt;
-    const updateTime = `${String(fetchedAt.getHours()).padStart(2, "0")}:${String(fetchedAt.getMinutes()).padStart(2, "0")}`;
+    const updateTime = fetchedAt
+        ? `${String(fetchedAt.getHours()).padStart(2, "0")}:${String(fetchedAt.getMinutes()).padStart(2, "0")}`
+        : "";
     const pollSeconds = imazatoLinerState.pollIntervalMs / 1000;
+    const isControlTest =
+        typeof isInformationControlTestActive === "function" &&
+        isInformationControlTestActive(now);
     document.querySelectorAll(".liner-online-status").forEach((element) => {
-        element.textContent = isOutsideOnlineServiceHours
+        element.textContent = isControlTest
+            ? "● 試験中"
+            : isOutsideOnlineServiceHours
             ? "● オンラインデータ（情報提供時間外）"
-            : `● オンラインデータ（${updateTime}更新・${pollSeconds}秒間隔更新）`;
+            : fetchedAt
+              ? `● オンラインデータ（${updateTime}更新・${pollSeconds}秒間隔更新）`
+              : "● 管理画面登録ダイヤ";
+        element.classList.toggle(
+            "information-control-test-banner",
+            isControlTest,
+        );
     });
 
     renderImazatoLinerList(
