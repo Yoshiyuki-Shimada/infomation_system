@@ -58,6 +58,39 @@ function Get-YahooRailwayColor {
     return "yellow"
 }
 
+function ConvertFrom-YahooRailwayHtmlText {
+    param([string]$Html)
+
+    if ([string]::IsNullOrWhiteSpace($Html)) { return "" }
+
+    $withoutTags = $Html -replace '<br\s*/?>', "`n" -replace '<[^>]*>', ' '
+    $decoded = [Net.WebUtility]::HtmlDecode($withoutTags)
+    return ($decoded -replace '[\r\n\t\s]+', ' ').Trim()
+}
+
+function Get-YahooRailwayTroubleEntries {
+    param([string]$Html)
+
+    $entries = New-Object System.Collections.ArrayList
+    if ([string]::IsNullOrWhiteSpace($Html)) { return @($entries) }
+
+    # Yahoo!は運行情報1件を dl要素で表現する。複数のdlを個別に取得する。
+    $pattern = '(?s)<dl[^>]*>\s*<dt[^>]*>(?<title>.*?)</dt>\s*<dd[^>]*class="[^"]*trouble[^"]*"[^>]*>\s*<p[^>]*>(?<message>.*?)</p>\s*</dd>\s*</dl>'
+    foreach ($match in [regex]::Matches($Html, $pattern, [Text.RegularExpressions.RegexOptions]::IgnoreCase)) {
+        $title = ConvertFrom-YahooRailwayHtmlText -Html $match.Groups['title'].Value
+        $message = ConvertFrom-YahooRailwayHtmlText -Html $match.Groups['message'].Value
+        if ([string]::IsNullOrWhiteSpace($message)) { continue }
+        if ($message -match "情報はありません|平常どおり") { continue }
+
+        [void]$entries.Add([pscustomobject]@{
+                Title = $title
+                Message = $message
+            })
+    }
+
+    return @($entries)
+}
+
 function ConvertTo-SignageComparisonJson {
     param([object]$SignageData)
 
@@ -1124,29 +1157,24 @@ while ($true) {
                     if ($yHtml -match '(?s)<h1[^>]*class="title"[^>]*>(?<n>.*?)</h1>') {
                         $yName = ($Matches['n'] -replace 'の運行情報', '').Trim()
                         
-                        # 修正ポイント：class="trouble" の後に他のクラス(suspendなど)が続いてもマッチするように [^"]* を追加
-                        if ($yHtml -match '(?s)<[a-z0-9]+[^>]*class="[^"]*trouble[^"]*"[^>]*>.*?<p[^>]*>(?<m>.*?)</p>') {
-                            $yMsg = ($Matches['m'] -replace '<[^>]*>', '' -replace '&nbsp;', ' ' -replace '[\r\n\t\s]+', ' ').Trim()
-                            
-                            # 平常運転時などのメッセージを除外
-                            if ($yMsg -match "情報はありません" -or [string]::IsNullOrWhiteSpace($yMsg) -or $yMsg -match "平常どおり") { continue }
+                        $troubleEntries = @(Get-YahooRailwayTroubleEntries -Html $yHtml)
+                        foreach ($troubleEntry in $troubleEntries) {
+                            $yTitle = [string]$troubleEntry.Title
+                            $yMsg = [string]$troubleEntry.Message
+                            $colorSource = "$yTitle $yMsg".Trim()
+                            $yCol = Get-YahooRailwayColor -Message $colorSource
 
-                            
-                            $yCol = "yellow" 
-                            Write-Host "状況:$yMsg"
-                            
-                            $yCol = Get-YahooRailwayColor -Message $yMsg
-
-
-                            $data.railway += @{ 
-                                company  = "私鉄線"; 
-                                name     = $yName; 
-                                body     = $yMsg; 
-                                color    = $yCol; 
+                            Write-Host "状況:$yTitle $yMsg"
+                            $data.railway += @{
+                                company  = "私鉄線";
+                                name     = $yName;
+                                title    = $yTitle;
+                                body     = $yMsg;
+                                color    = $yCol;
                                 lineCode = 1;
                                 lineId   = [string]$id;
                             }
-                            Write-Host "  -> [Yahoo!] $yName ($yCol)" -ForegroundColor Green
+                            Write-Host "  -> [Yahoo!] $yName / $yTitle ($yCol)" -ForegroundColor Green
                         }
                     }
                 }

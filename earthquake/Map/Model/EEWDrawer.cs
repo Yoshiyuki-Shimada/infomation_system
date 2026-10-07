@@ -38,7 +38,13 @@ namespace Map.Model
                 .SelectMany(e => e).Where(e => eqAreaCode2Name.ContainsKey(e)).Select(e => eqAreaCode2Name[e]);
 
             var coordinates = names
-                .Select(e => stations.GetArea(e)).Where(e => e != null);
+                .Select(e => stations.GetArea(e))
+                .Where(e => e != null)
+                .ToArray();
+            if (coordinates.Length == 0)
+            {
+                return null;
+            }
 
             return new LTRBCoordinate(
                 coordinates.Select(e => e.Longitude).Min(),

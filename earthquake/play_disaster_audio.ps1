@@ -4,7 +4,9 @@
     [int]$Scale = 0,
     [switch]$FollowUp,
     [switch]$Cancelled,
-    [string]$AreaCodes = ""
+    [string]$AreaCodes = "",
+    [string]$VoiceFiles = "",
+    [switch]$GenericEew
 )
 
 $ErrorActionPreference = "Stop"
@@ -12,7 +14,9 @@ $ErrorActionPreference = "Stop"
 $projectDir = Split-Path -Path $PSScriptRoot -Parent
 $p2pAudioDir = Join-Path $PSScriptRoot "WpfClient\Resources\Sounds"
 $eewVoiceDir = Join-Path $p2pAudioDir "EEW"
+$eewReadingDir = Join-Path $PSScriptRoot "Reading\eew"
 $priorityPath = Join-Path $projectDir "temp\eew_audio_priority.lock"
+$processIdPath = Join-Path $projectDir "temp\disaster_audio.pid"
 $logDir = Join-Path $projectDir "logs"
 $logPath = Join-Path $logDir "disaster_audio.log"
 $audioMutex = [Threading.Mutex]::new($false, "Global\InfomationSystemDisasterAudio")
@@ -20,6 +24,11 @@ $parsedAreaCodes = @(
     $AreaCodes -split "," |
         Where-Object { $_ -match "^\d+$" } |
         ForEach-Object { [int]$_ }
+)
+$parsedVoiceFiles = @(
+    $VoiceFiles -split "," |
+        ForEach-Object { $_.Trim() } |
+        Where-Object { $_ -match "^[A-Za-z0-9_-]+\.mp3$" }
 )
 Add-Type -AssemblyName PresentationCore
 
@@ -89,14 +98,24 @@ function Play-DisasterSound {
 function Play-EewVoiceSequence {
     $announcementName = if ($FollowUp) { "eew_followup.mp3" } else { "eew.mp3" }
     $sequence = @($announcementName, "announce_areas.mp3")
-    $sequence += @($parsedAreaCodes | ForEach-Object { "$_.mp3" })
+    $sequence += $parsedVoiceFiles
     $sequence += @($announcementName, "announce_areas.mp3")
-    $sequence += @($parsedAreaCodes | ForEach-Object { "$_.mp3" })
+    $sequence += $parsedVoiceFiles
     $sequence += "guidance.mp3"
 
     foreach ($fileName in $sequence) {
-        [void](Play-DisasterSound -Path (Join-Path $eewVoiceDir $fileName))
+        $baseDirectory = if ($fileName -match "^\d+\.mp3$") { $eewVoiceDir } else { $eewReadingDir }
+        if ($fileName -in @("eew.mp3", "eew_followup.mp3", "announce_areas.mp3", "guidance.mp3")) {
+            $baseDirectory = $eewVoiceDir
+        }
+        [void](Play-DisasterSound -Path (Join-Path $baseDirectory $fileName))
     }
+}
+
+function Play-GenericEewVoice {
+    $announcementName = if ($FollowUp) { "eew_followup.mp3" } else { "eew.mp3" }
+    [void](Play-DisasterSound -Path (Join-Path $eewVoiceDir $announcementName))
+    [void](Play-DisasterSound -Path (Join-Path $eewReadingDir "hanyou.mp3"))
 }
 
 function Play-EewAudio {
@@ -107,6 +126,10 @@ function Play-EewAudio {
 
     # P2P地震情報クライアントと同じ警報音と読み上げ素材を同じ順番で再生する。
     [void](Play-DisasterSound -Path (Join-Path $p2pAudioDir "EEW_Beta.mp3"))
+    if ($GenericEew) {
+        Play-GenericEewVoice
+        return
+    }
     Play-EewVoiceSequence
 }
 
@@ -139,7 +162,12 @@ try {
         (Get-Date).AddMinutes(5).ToString("o"),
         [Text.UTF8Encoding]::new($false)
     )
-    Write-DisasterAudioLog -Message "災害通知音を開始します: mode=$Mode scale=$Scale followUp=$FollowUp cancelled=$Cancelled areas=$($parsedAreaCodes -join ',')"
+    [IO.File]::WriteAllText(
+        $processIdPath,
+        [string]$PID,
+        [Text.UTF8Encoding]::new($false)
+    )
+    Write-DisasterAudioLog -Message "災害通知音を開始します: mode=$Mode scale=$Scale followUp=$FollowUp cancelled=$Cancelled genericEew=$GenericEew areas=$($parsedAreaCodes -join ',') voices=$($parsedVoiceFiles -join ',')"
     switch ($Mode) {
         "Eew" { Play-EewAudio }
         "Earthquake" { Play-EarthquakeAudio }
@@ -153,6 +181,12 @@ catch {
 }
 finally {
     Remove-Item -LiteralPath $priorityPath -Force -ErrorAction SilentlyContinue
+    if (Test-Path -LiteralPath $processIdPath -PathType Leaf) {
+        $registeredProcessId = Get-Content -LiteralPath $processIdPath -Raw -ErrorAction SilentlyContinue
+        if ($registeredProcessId -and $registeredProcessId.Trim() -eq [string]$PID) {
+            Remove-Item -LiteralPath $processIdPath -Force -ErrorAction SilentlyContinue
+        }
+    }
     if ($hasMutex) { [void]$audioMutex.ReleaseMutex() }
     $audioMutex.Dispose()
 }

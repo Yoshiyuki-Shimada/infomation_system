@@ -14,6 +14,7 @@ $packageDir = Join-Path -Path $updateRoot -ChildPath "packages"
 $stagingRoot = Join-Path -Path $updateRoot -ChildPath "staging"
 $backupRoot = Join-Path -Path $updateRoot -ChildPath "backup"
 $logDir = Join-Path -Path $updateRoot -ChildPath "logs"
+$managementWatchPath = Join-Path -Path $updateRoot -ChildPath "management_inbox"
 $informationLogDir = Join-Path -Path $projectDir -ChildPath "logs\information"
 $informationLogExportName = "information_logs"
 $configPath = Join-Path -Path $PSScriptRoot -ChildPath "update_config.json"
@@ -21,6 +22,8 @@ $defaultWatchPath = "C:\infomation_system_updates\inbox"
 $mutex = [Threading.Mutex]::new($false, "Global\InfomationSystemUpdateAgent")
 $authToken = ""
 $lastNewsFetcherStartAttempt = [datetime]::MinValue
+$backupRetentionCount = 2
+$packageRetentionCount = 2
 
 function Ensure-Directory {
     param([string]$Path)
@@ -53,6 +56,35 @@ function Remove-DirectorySafe {
     }
 
     Remove-Item -LiteralPath $Path -Recurse -Force
+}
+
+function Remove-OldUpdateArtifacts {
+    # 更新のたびに大容量ファイルが蓄積しないよう、復旧に必要な直近世代だけを残す。
+    $existingBackupCount = [Math]::Max(0, $backupRetentionCount - 1)
+    $existingPackageCount = [Math]::Max(0, $packageRetentionCount - 1)
+
+    if (Test-Path -LiteralPath $backupRoot -PathType Container) {
+        Get-ChildItem -LiteralPath $backupRoot -Directory -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -Skip $existingBackupCount |
+            ForEach-Object {
+                Remove-DirectorySafe -Path $_.FullName -AllowedParent $backupRoot
+            }
+    }
+
+    if (Test-Path -LiteralPath $packageDir -PathType Container) {
+        Get-ChildItem -LiteralPath $packageDir -Filter "infomation_system_update_*.zip" -File -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -Skip $existingPackageCount |
+            Remove-Item -Force
+    }
+
+    if (Test-Path -LiteralPath $stagingRoot -PathType Container) {
+        Get-ChildItem -LiteralPath $stagingRoot -Directory -ErrorAction SilentlyContinue |
+            ForEach-Object {
+                Remove-DirectorySafe -Path $_.FullName -AllowedParent $stagingRoot
+            }
+    }
 }
 
 function Write-UpdateLog {
@@ -283,7 +315,8 @@ function Stop-SignageProcesses {
             Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
         }
 
-    Get-Process -Name "EarthquakeSignageBridge" -ErrorAction SilentlyContinue |
+    $earthquakeProcessNames = @("EarthquakeSignageBridge", "WpfClient")
+    Get-Process -Name $earthquakeProcessNames -ErrorAction SilentlyContinue |
         Stop-Process -Force -ErrorAction SilentlyContinue
 
     Get-CimInstance Win32_Process |
@@ -295,6 +328,16 @@ function Stop-SignageProcesses {
         ForEach-Object {
             Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
         }
+
+    # 終了直後の実行ファイルを上書きするとロックが残ることがあるため、完全終了を待つ。
+    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+        $remaining = @(Get-Process -Name $earthquakeProcessNames -ErrorAction SilentlyContinue)
+        if ($remaining.Count -eq 0) { return }
+        $remaining | Stop-Process -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Milliseconds 500
+    }
+
+    throw "地震情報プロセスを停止できませんでした。"
 }
 
 function Ensure-NewsFetcherRunning {
@@ -367,14 +410,51 @@ function Backup-CurrentSystem {
     $backupDir = Join-Path -Path $backupRoot -ChildPath (Get-Date -Format "yyyyMMdd_HHmmss")
     Ensure-Directory $backupDir
 
-    $excludeRootNames = @(".git", "_update", "temp", "logs")
-    Get-ChildItem -LiteralPath $projectDir -Force |
-        Where-Object { $excludeRootNames -notcontains $_.Name } |
-        ForEach-Object {
-            Copy-Item -LiteralPath $_.FullName -Destination $backupDir -Recurse -Force
-        }
+    # 稼働中の永続DBは配布対象外で、更新時も既存ファイルを保持する。
+    # そのためバックアップでも除外し、DBロックで更新全体が停止するのを防ぐ。
+    $arguments = @(
+        $projectDir,
+        $backupDir,
+        "/E",
+        "/COPY:DAT",
+        "/DCOPY:DAT",
+        "/R:5",
+        "/W:1",
+        "/XD",
+        (Join-Path $projectDir ".git"),
+        (Join-Path $projectDir "_update"),
+        (Join-Path $projectDir "temp"),
+        (Join-Path $projectDir "logs"),
+        (Join-Path $projectDir "database\runtime")
+    )
+
+    & robocopy.exe @arguments | Out-Null
+    if ($LASTEXITCODE -gt 7) {
+        throw "更新前バックアップに失敗しました。robocopy exit code: $LASTEXITCODE"
+    }
 
     return $backupDir
+}
+
+function Copy-StagedSystemWithRetry {
+    param([string]$StagingDir)
+
+    $arguments = @(
+        $StagingDir,
+        $projectDir,
+        "/E",
+        "/COPY:DAT",
+        "/DCOPY:DAT",
+        "/R:5",
+        "/W:2",
+        "/NFL",
+        "/NDL",
+        "/NP"
+    )
+    & robocopy.exe @arguments | ForEach-Object { Write-UpdateLog $_ }
+    if ($LASTEXITCODE -gt 7) {
+        throw "新しいシステムファイルのコピーに失敗しました。robocopy exit code: $LASTEXITCODE"
+    }
 }
 
 function Apply-MonitorCss {
@@ -421,6 +501,34 @@ function Complete-RequestFile {
     Move-Item -LiteralPath $ReadyPath -Destination $targetPath -Force
 }
 
+function Complete-FailedRequestFile {
+    param(
+        [string]$ReadyPath,
+        [string]$Detail
+    )
+
+    $request = Get-Content -Raw -Encoding UTF8 -LiteralPath $ReadyPath |
+        ConvertFrom-Json
+    $request | Add-Member -NotePropertyName "failedAt" -NotePropertyValue ((Get-Date).ToUniversalTime().ToString("o")) -Force
+    $request | Add-Member -NotePropertyName "failureDetail" -NotePropertyValue $Detail -Force
+
+    $targetPath = [IO.Path]::ChangeExtension($ReadyPath, "failed.json")
+    $json = $request | ConvertTo-Json -Depth 10
+    [IO.File]::WriteAllText($targetPath, $json, [Text.UTF8Encoding]::new($false))
+    Remove-Item -LiteralPath $ReadyPath -Force
+}
+
+function Start-SystemAfterUpdateFailure {
+    $startPath = Join-Path -Path $PSScriptRoot -ChildPath "start.bat"
+    if (-not (Test-Path -LiteralPath $startPath -PathType Leaf)) { return }
+
+    Start-Process `
+        -FilePath "cmd.exe" `
+        -ArgumentList "/c `"$startPath`"" `
+        -WorkingDirectory $PSScriptRoot `
+        -WindowStyle Hidden
+}
+
 function Invoke-SystemUpdate {
     param([string]$ReadyPath)
 
@@ -455,6 +563,7 @@ function Invoke-SystemUpdate {
     Ensure-Directory $packageDir
     Ensure-Directory $stagingRoot
     Ensure-Directory $backupRoot
+    Remove-OldUpdateArtifacts
 
     $localZip = Join-Path -Path $packageDir -ChildPath $packageName
     Copy-Item -LiteralPath $sourceZip -Destination $localZip -Force
@@ -472,10 +581,7 @@ function Invoke-SystemUpdate {
     Expand-Archive -LiteralPath $localZip -DestinationPath $stagingDir -Force
 
     Write-UpdateStatus -Message "アップデート中" -Detail "新しいシステムファイルをコピーしています。"
-    Get-ChildItem -LiteralPath $stagingDir -Force |
-        ForEach-Object {
-            Copy-Item -LiteralPath $_.FullName -Destination $projectDir -Recurse -Force
-        }
+    Copy-StagedSystemWithRetry -StagingDir $stagingDir
 
     Apply-MonitorCss
     Remove-DirectorySafe -Path $tempDir -AllowedParent $projectDir
@@ -503,6 +609,7 @@ try {
     Resolve-Setting
     Ensure-Directory $WatchPath
     Ensure-Directory $updateRoot
+    Ensure-Directory $managementWatchPath
     Write-UpdateLog "譖ｴ譁ｰ蠕・ｩ溘ｒ髢句ｧ九＠縺ｾ縺励◆: $WatchPath"
     if ([string]::IsNullOrWhiteSpace($authToken)) {
         Write-UpdateLog "authToken が未設定のため、更新適用は無効です。"
@@ -512,17 +619,24 @@ try {
         Ensure-NewsFetcherRunning
         Export-InformationLogs
 
-        $requests = Get-ChildItem -LiteralPath $WatchPath -Filter "*.ready.json" -File -ErrorAction SilentlyContinue |
-            Sort-Object LastWriteTime
+        # 共有フォルダーと管理画面アップロードの両方を同じ検証処理へ渡す。
+        $watchPaths = @($WatchPath, $managementWatchPath) |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            Select-Object -Unique
+        $requests = @($watchPaths | ForEach-Object {
+            Get-ChildItem -LiteralPath $_ -Filter "*.ready.json" -File -ErrorAction SilentlyContinue
+        } | Sort-Object LastWriteTime)
 
         foreach ($requestFile in $requests) {
             try {
                 Invoke-SystemUpdate -ReadyPath $requestFile.FullName
             }
             catch {
-                Write-UpdateStatus -Message "アップデート失敗" -Detail $_.Exception.Message
-                Write-UpdateLog "譖ｴ譁ｰ螟ｱ謨・ $($_.Exception.Message)"
-                Complete-RequestFile -ReadyPath $requestFile.FullName -Status "failed"
+                $failureDetail = "{0}`r`n{1}" -f $_.Exception.Message, $_.ScriptStackTrace
+                Write-UpdateStatus -Message "アップデート失敗" -Detail $failureDetail
+                Write-UpdateLog "譖ｴ譁ｰ螟ｱ謨・ $failureDetail"
+                Complete-FailedRequestFile -ReadyPath $requestFile.FullName -Detail $failureDetail
+                Start-SystemAfterUpdateFailure
             }
         }
 

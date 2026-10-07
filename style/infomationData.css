@@ -500,7 +500,7 @@
 
 .weather_weekly_item {
     display: grid;
-    grid-template-rows: 2.8rem 98px 3.2rem 2rem 1.8rem minmax(2.2rem, auto);
+    grid-template-rows: 2.8rem 98px 6.2rem 5.2rem 2.6rem minmax(2.2rem, auto);
     align-items: center;
     min-width: 0;
     padding: 18px 8px;
@@ -537,7 +537,9 @@
     align-items: center;
     justify-content: center;
     min-width: 0;
-    height: 3.2rem;
+    height: 6.2rem;
+    padding: 6px 2px;
+    box-sizing: border-box;
     font-size: 1rem;
     font-weight: bold;
     line-height: 1.2;
@@ -545,7 +547,11 @@
 }
 
 .weather_weekly_temperature {
-    margin-top: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 8px;
     font-size: 1.25rem;
     font-weight: bold;
 }
@@ -565,7 +571,7 @@
 }
 
 .weather_weekly_precipitation {
-    margin-top: 0;
+    margin-top: 10px;
     font-size: 1rem;
     font-weight: bold;
 }
@@ -738,6 +744,33 @@
     border-top: 10px solid #c40024;
 }
 
+.eew-rotation-slide {
+    position: absolute;
+    inset: 0;
+    padding: 0;
+    overflow: hidden;
+    background: #fff;
+}
+
+.eew-rotation-set {
+    position: absolute;
+    inset: 0;
+}
+
+.eew-rotation-frame {
+    position: absolute;
+    inset: 0;
+    display: none;
+    flex-direction: column;
+    padding: 22px;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+.eew-rotation-frame.is-active {
+    display: flex;
+}
+
 .tsunami-slide {
     border-top: 10px solid #6d1bb1;
 }
@@ -838,6 +871,14 @@
     gap: 12px;
 }
 
+.eew-area-text {
+    color: #111;
+    font-size: 2rem;
+    font-weight: bold;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
 .eew-detail-grid > div {
     padding: 12px 15px;
     background: #f3f5f7;
@@ -856,6 +897,19 @@
     font-size: 1.55rem;
 }
 
+.eew-event-times {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 12px 15px;
+    color: #111;
+    background: #f3f5f7;
+    border: 1px solid #aab3bd;
+    font-size: 1.35rem;
+    font-weight: bold;
+    line-height: 1.3;
+}
+
 .eew-area-list,
 .quake-point-list,
 .tsunami-detail-list {
@@ -866,10 +920,32 @@
     overflow: hidden;
 }
 
+.tsunami-scroll-viewport {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.tsunami-detail-list {
+    grid-template-columns: 1fr;
+    align-content: start;
+    overflow: visible;
+}
+
 .eew-area-list {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 6px;
     align-content: start;
+}
+
+.eew-area-list--dense {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 4px;
+}
+
+.eew-area-list--maximum {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 3px;
 }
 
 .eew-area-item,
@@ -882,6 +958,17 @@
     border-left: 8px solid #d40025;
     font-size: 1.08rem;
     font-weight: bold;
+}
+
+.tsunami-area-item {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 18px;
+    row-gap: 3px;
+}
+
+.tsunami-area-grade {
+    grid-column: 1 / -1;
 }
 
 .eew-area-item,
@@ -903,6 +990,19 @@
 .eew-area-item span {
     min-width: 0;
     overflow-wrap: anywhere;
+}
+
+.eew-area-list--dense .eew-area-item,
+.eew-area-list--maximum .eew-area-item {
+    padding: 4px 6px;
+    border-left-width: 4px;
+    font-size: 0.82rem;
+    line-height: 1.15;
+}
+
+.eew-area-list--maximum .eew-area-item {
+    padding: 3px 5px;
+    font-size: 0.76rem;
 }
 
 .eew-area-item strong,
@@ -948,6 +1048,10 @@
     padding: 22px;
     box-sizing: border-box;
     overflow: hidden;
+}
+
+.disaster-main-inner.eew-rotation-slide {
+    padding: 0;
 }
 
 .disaster-ticker {

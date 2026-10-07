@@ -2,6 +2,11 @@ const apiBase = window.location.origin;
 let controlState = null;
 let toastTimer = null;
 let activeTimetableFilter = null;
+let disasterReference = null;
+let selectedEewAreas = [];
+let selectedQuakeAreas = [];
+let selectedQuakePoints = [];
+let selectedTsunamiAreas = [];
 
 const timetableStopLabels = {
     tajima: "田島三丁目",
@@ -25,67 +30,229 @@ const scheduleTypeLabels = {
     holiday: "休日",
 };
 
-const earthquakeScaleOptions = ["3", "4", "5弱", "5強", "6弱", "6強", "7"];
+const earthquakeScaleOptions = ["欠測", "1", "2", "3", "4", "5弱", "5強", "6弱", "6強", "7"];
 
 function createScaleOptions(selected = "3") {
     return earthquakeScaleOptions.map((scale) =>
-        `<option value="${scale}"${scale === selected ? " selected" : ""}>震度${scale}</option>`,
+        `<option value="${scale}"${scale === selected ? " selected" : ""}>${scale === "欠測" ? "欠測" : `震度${scale}`}</option>`,
     ).join("");
 }
 
-function addQuakeTestPoint(pref = "大阪府", name = "大阪市生野区", scale = "4") {
-    const row = document.createElement("div");
-    row.className = "test-point-row quake-test-point";
-    row.innerHTML = `
-        <label>都道府県<input data-field="pref" value="${escapeHtml(pref)}"></label>
-        <label>拠点<input data-field="name" value="${escapeHtml(name)}"></label>
-        <label>震度<select data-field="scale">${createScaleOptions(scale)}</select></label>
-        <button class="danger" type="button" data-remove-test-row>削除</button>`;
-    document.getElementById("quake-test-points").appendChild(row);
+function setSelectOptions(select, items, valueKey = "name", labelKey = "name") {
+    select.innerHTML = items.map((item) =>
+        `<option value="${escapeHtml(String(item[valueKey]))}">${escapeHtml(String(item[labelKey]))}</option>`,
+    ).join("");
 }
 
-function addTsunamiTestArea(name = "大阪府", grade = "津波注意報") {
-    const row = document.createElement("div");
-    row.className = "test-point-row tsunami tsunami-test-area";
-    row.innerHTML = `
-        <label>地点<input data-field="name" value="${escapeHtml(name)}"></label>
-        <label>種別<select data-field="grade">
-            ${["大津波警報", "津波警報", "津波注意報"].map((item) => `<option${item === grade ? " selected" : ""}>${item}</option>`).join("")}
-        </select></label>
-        <button class="danger" type="button" data-remove-test-row>削除</button>`;
-    document.getElementById("tsunami-test-areas").appendChild(row);
+function getLocationKey(item) {
+    return `${item.pref || ""}|${item.name}`;
 }
 
-function collectDisasterTestPayload(kind) {
+function getSelectedValues(select) {
+    return Array.from(select.selectedOptions).map((option) => option.value);
+}
+
+function setGroupedLocationOptions(select, locations) {
+    select.innerHTML = "";
+    const groups = new Map();
+    locations.forEach((location) => {
+        const pref = location.pref || "その他";
+        if (!groups.has(pref)) groups.set(pref, []);
+        groups.get(pref).push(location);
+    });
+    groups.forEach((items, pref) => {
+        const group = document.createElement("optgroup");
+        group.label = pref;
+        items.forEach((item) => {
+            const option = document.createElement("option");
+            option.value = getLocationKey(item);
+            option.textContent = item.name;
+            group.appendChild(option);
+        });
+        select.appendChild(group);
+    });
+}
+
+function renderEewAssignments() {
+    const assignedCodes = new Set(selectedEewAreas.map((area) => String(area.code)));
+    const available = disasterReference.eewAreas.filter((area) => !assignedCodes.has(String(area.code)));
+    setSelectOptions(document.getElementById("eew-area-available"), available, "code", "name");
+    setSelectOptions(document.getElementById("eew-area-selected"), selectedEewAreas, "code", "name");
+}
+
+function changeEewAssignments(add, all = false) {
+    const source = document.getElementById(add ? "eew-area-available" : "eew-area-selected");
+    const codes = all
+        ? Array.from(source.options).map((option) => option.value)
+        : getSelectedValues(source);
+    if (add) {
+        const additions = disasterReference.eewAreas.filter((area) => codes.includes(String(area.code)));
+        selectedEewAreas.push(...additions);
+    } else {
+        selectedEewAreas = selectedEewAreas.filter((area) => !codes.includes(String(area.code)));
+    }
+    renderEewAssignments();
+}
+
+function getQuakeAssignmentConfig(kind) {
+    return kind === "area"
+        ? {
+            source: disasterReference.observationAreas,
+            assignments: selectedQuakeAreas,
+            scaleId: "quake-area-scale",
+            availableId: "quake-area-available",
+            selectedId: "quake-area-selected",
+        }
+        : {
+            source: disasterReference.observationPoints,
+            assignments: selectedQuakePoints,
+            scaleId: "quake-point-scale",
+            availableId: "quake-point-available",
+            selectedId: "quake-point-selected",
+        };
+}
+
+function renderQuakeAssignments(kind) {
+    const config = getQuakeAssignmentConfig(kind);
+    const currentScale = document.getElementById(config.scaleId).value;
+    const assignedKeys = new Set(config.assignments.map(getLocationKey));
+    const available = config.source.filter((item) => !assignedKeys.has(getLocationKey(item)));
+    const selected = config.assignments.filter((item) => item.scale === currentScale);
+    setGroupedLocationOptions(document.getElementById(config.availableId), available);
+    setGroupedLocationOptions(document.getElementById(config.selectedId), selected);
+}
+
+function addQuakeAssignments(kind, all = false) {
+    const config = getQuakeAssignmentConfig(kind);
+    const sourceSelect = document.getElementById(config.availableId);
+    const keys = all
+        ? Array.from(sourceSelect.querySelectorAll("option")).map((option) => option.value)
+        : getSelectedValues(sourceSelect);
+    const scale = document.getElementById(config.scaleId).value;
+    config.source
+        .filter((item) => keys.includes(getLocationKey(item)))
+        .forEach((item) => config.assignments.push({ pref: item.pref, name: item.name, scale }));
+    renderQuakeAssignments(kind);
+}
+
+function removeQuakeAssignments(kind, all = false) {
+    const config = getQuakeAssignmentConfig(kind);
+    const scale = document.getElementById(config.scaleId).value;
+    const selectedSelect = document.getElementById(config.selectedId);
+    const keys = all
+        ? config.assignments.filter((item) => item.scale === scale).map(getLocationKey)
+        : getSelectedValues(selectedSelect);
+    const retained = config.assignments.filter((item) => !keys.includes(getLocationKey(item)));
+    if (kind === "area") selectedQuakeAreas = retained;
+    else selectedQuakePoints = retained;
+    renderQuakeAssignments(kind);
+}
+
+function renderTsunamiAssignments() {
+    const grade = document.getElementById("tsunami-grade-select").value;
+    const assignedNames = new Set(selectedTsunamiAreas.map((area) => area.name));
+    const available = disasterReference.tsunamiAreas.filter((area) => !assignedNames.has(area.name));
+    const selected = selectedTsunamiAreas.filter((area) => area.grade === grade);
+    setSelectOptions(document.getElementById("tsunami-area-available"), available);
+    setSelectOptions(document.getElementById("tsunami-area-selected"), selected);
+}
+
+function addTsunamiAssignments(all = false) {
+    const source = document.getElementById("tsunami-area-available");
+    const names = all
+        ? Array.from(source.options).map((option) => option.value)
+        : getSelectedValues(source);
+    const grade = document.getElementById("tsunami-grade-select").value;
+    disasterReference.tsunamiAreas
+        .filter((area) => names.includes(area.name))
+        .forEach((area) => selectedTsunamiAreas.push({ name: area.name, grade }));
+    renderTsunamiAssignments();
+}
+
+function removeTsunamiAssignments(all = false) {
+    const grade = document.getElementById("tsunami-grade-select").value;
+    const names = all
+        ? selectedTsunamiAreas.filter((area) => area.grade === grade).map((area) => area.name)
+        : getSelectedValues(document.getElementById("tsunami-area-selected"));
+    selectedTsunamiAreas = selectedTsunamiAreas.filter((area) => !names.includes(area.name));
+    renderTsunamiAssignments();
+}
+
+function setHypocenterOptions(select, items) {
+    select.innerHTML = items.map((item) => `
+        <option value="${escapeHtml(item.name)}"
+            data-latitude="${escapeHtml(item.latitude ?? "")}"
+            data-longitude="${escapeHtml(item.longitude ?? "")}">${escapeHtml(item.name)}</option>
+    `).join("");
+}
+
+function formatLocalDateTimeInput(date) {
+    const adjusted = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+    return adjusted.toISOString().slice(0, 16);
+}
+
+async function loadDisasterReference() {
+    const payload = await requestJson("/infomation_control/api/disaster-reference");
+    disasterReference = payload.data;
+    setHypocenterOptions(document.getElementById("eew-hypocenter"), disasterReference.hypocenters);
+    setHypocenterOptions(document.getElementById("quake-hypocenter"), disasterReference.hypocenters);
+    document.getElementById("quake-area-scale").innerHTML = createScaleOptions("3");
+    document.getElementById("quake-point-scale").innerHTML = createScaleOptions("4");
+
+    document.getElementById("eew-hypocenter").value = "大阪府";
+    document.getElementById("quake-hypocenter").value = "大阪府北部";
+    const currentLocalTime = formatLocalDateTimeInput(new Date());
+    document.getElementById("eew-occurred-at").value = currentLocalTime;
+    document.getElementById("quake-occurred-at").value = currentLocalTime;
+    selectedEewAreas = disasterReference.eewAreas.filter((area) => ["大阪", "兵庫", "京都", "奈良"].includes(area.name));
+    const defaultArea = disasterReference.observationAreas.find((area) => area.name.includes("大阪府北部")) ||
+        disasterReference.observationAreas.find((area) => area.pref === "大阪府");
+    if (defaultArea) selectedQuakeAreas.push({ ...defaultArea, scale: "3" });
+    const ikunoPoint = disasterReference.observationPoints.find((point) => point.name.includes("生野区"));
+    if (ikunoPoint) selectedQuakePoints.push({ ...ikunoPoint, scale: "4" });
+    const defaultTsunami = disasterReference.tsunamiAreas.find((area) => area.name === "大阪府");
+    if (defaultTsunami) selectedTsunamiAreas.push({ name: defaultTsunami.name, grade: "津波注意報" });
+    renderEewAssignments();
+    renderQuakeAssignments("area");
+    renderQuakeAssignments("point");
+    renderTsunamiAssignments();
+}
+
+function collectDisasterTestPayload(kind, earthquakeType = "", eewType = "announcement") {
     const common = { action: "earthquakeTest", kind };
     if (kind === "eew") {
         return {
             ...common,
-            hypocenter: document.getElementById("eew-hypocenter").value.trim(),
-            eewAreas: document.getElementById("eew-areas").value
-                .split(/[、,\n]/).map((value) => value.trim()).filter(Boolean),
+            eewType,
+            hypocenter: document.getElementById("eew-hypocenter").value,
+            occurredAt: document.getElementById("eew-occurred-at").value,
+            eewAreas: selectedEewAreas.map((area) => String(area.code)),
         };
     }
     if (kind === "earthquake") {
-        const earthquakePoints = Array.from(document.querySelectorAll(".quake-test-point")).map((row) => ({
-            pref: row.querySelector('[data-field="pref"]').value.trim(),
-            name: row.querySelector('[data-field="name"]').value.trim(),
-            scale: row.querySelector('[data-field="scale"]').value,
-        })).filter((point) => point.name);
+        const hypocenterSelect = document.getElementById("quake-hypocenter");
+        const hypocenterOption = hypocenterSelect.selectedOptions[0];
         return {
             ...common,
-            hypocenter: document.getElementById("quake-hypocenter").value.trim(),
-            scale: earthquakePoints[0]?.scale || "3",
-            earthquakePoints,
+            earthquakeType,
+            hypocenter: hypocenterSelect.value,
+            hypocenterLatitude: hypocenterOption?.dataset.latitude || "",
+            hypocenterLongitude: hypocenterOption?.dataset.longitude || "",
+            occurredAt: document.getElementById("quake-occurred-at").value,
+            magnitude: document.getElementById("quake-magnitude").value,
+            depth: document.getElementById("quake-depth").value,
+            tsunamiType: document.getElementById("quake-tsunami-type").value,
+            scale: earthquakeType === "scale-prompt"
+                ? selectedQuakeAreas[0]?.scale || "3"
+                : selectedQuakePoints[0]?.scale || "3",
+            earthquakeAreas: selectedQuakeAreas,
+            earthquakePoints: selectedQuakePoints,
         };
     }
     if (kind === "tsunami") {
         return {
             ...common,
-            tsunamiAreas: Array.from(document.querySelectorAll(".tsunami-test-area")).map((row) => ({
-                name: row.querySelector('[data-field="name"]').value.trim(),
-                grade: row.querySelector('[data-field="grade"]').value,
-            })).filter((area) => area.name),
+            tsunamiAreas: selectedTsunamiAreas,
         };
     }
     return common;
@@ -132,6 +299,327 @@ async function requestJson(path, options = {}) {
     const payload = await response.json();
     if (!response.ok || payload.ok === false) throw new Error(payload.error || `HTTP ${response.status}`);
     return payload;
+}
+
+async function loadScreenList() {
+    const payload = await requestJson("/infomation_control/api/screens");
+    const screens = payload.screens || [];
+    document.getElementById("screen-summary").textContent = screens.length
+        ? `${screens.length}画面を検出: ${screens.map((screen) => `画面${screen.number} ${screen.width}x${screen.height}${screen.primary ? "（メイン）" : ""}`).join(" / ")}`
+        : "接続中の画面を検出できません。";
+    document.querySelectorAll("[data-capture-screen]").forEach((button) => {
+        button.disabled = Number(button.dataset.captureScreen) > screens.length;
+    });
+}
+
+async function captureScreen(screenNumber, button) {
+    button.disabled = true;
+    const originalText = button.textContent;
+    button.textContent = "取得中";
+    try {
+        const payload = await requestJson(`/infomation_control/api/screenshot?screen=${screenNumber}`);
+        const dataUrl = `data:${payload.mimeType};base64,${payload.dataBase64}`;
+        const image = document.getElementById(`screenshot-${screenNumber}`);
+        const download = document.getElementById(`download-screenshot-${screenNumber}`);
+        image.src = dataUrl;
+        download.href = dataUrl;
+        download.classList.remove("is-disabled");
+        showToast(`画面${screenNumber}を取得しました。`);
+    } catch (error) {
+        showToast(error.message, true);
+    } finally {
+        button.disabled = false;
+        button.textContent = originalText;
+    }
+}
+
+async function runSystemCommand(path, successMessage) {
+    const payload = await requestJson(path);
+    if (payload.ok) showToast(successMessage);
+    return payload;
+}
+
+function arrayBufferToBase64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    const step = 32768;
+    for (let offset = 0; offset < bytes.length; offset += step) {
+        binary += String.fromCharCode(...bytes.subarray(offset, offset + step));
+    }
+    return btoa(binary);
+}
+
+const updateExcludedRootNames = new Set([
+    ".git", "_update", "temp", "logs", "monitor_css", "document",
+]);
+const defaultUpdateSourcePath = "D:\\開発\\infomation_system";
+const updateSourceStorageKey = "infomation-system-update-source-path";
+
+function getStoredUpdateSourcePath() {
+    try {
+        return localStorage.getItem(updateSourceStorageKey) || defaultUpdateSourcePath;
+    } catch (_error) {
+        return defaultUpdateSourcePath;
+    }
+}
+
+function applyUpdateSourcePath(path) {
+    const normalized = String(path || "").trim() || defaultUpdateSourcePath;
+    const pathInput = document.getElementById("update-source-path");
+    const folderInput = document.getElementById("update-file");
+    pathInput.value = normalized;
+    folderInput.setAttribute("nwworkingdir", normalized);
+    folderInput.title = `既定の更新元: ${normalized}`;
+}
+
+function saveUpdateSourcePath() {
+    const path = document.getElementById("update-source-path").value.trim();
+    if (!/(^|[\\/])infomation_system[\\/]?$/i.test(path)) {
+        throw new Error("更新元パスはinfomation_systemフォルダーを指定してください。");
+    }
+
+    try {
+        localStorage.setItem(updateSourceStorageKey, path);
+    } catch (_error) {
+        throw new Error("このブラウザでは既定パスを保存できません。");
+    }
+    applyUpdateSourcePath(path);
+    document.getElementById("update-status").textContent = `既定の更新元を ${path} に変更しました。`;
+    showToast("更新元の既定設定を保存しました。");
+}
+
+function detectSelectedUpdateSourcePath(input) {
+    const firstFile = Array.from(input.files || [])[0];
+    if (!firstFile?.path || !firstFile.webkitRelativePath) return;
+    const relativePath = firstFile.webkitRelativePath.replace(/\//g, "\\");
+    const fullPath = String(firstFile.path).replace(/\//g, "\\");
+    if (!fullPath.toLowerCase().endsWith(relativePath.toLowerCase())) return;
+    applyUpdateSourcePath(fullPath.slice(0, -relativePath.length).replace(/[\\/]$/, ""));
+}
+
+function getUpdateRelativePath(file) {
+    const sourcePath = String(file.webkitRelativePath || file.name).replace(/\\/g, "/");
+    const parts = sourcePath.split("/").filter(Boolean);
+    if (parts.length < 2 || parts[0].toLowerCase() !== "infomation_system") {
+        throw new Error("infomation_systemフォルダーを選択してください。");
+    }
+    return parts.slice(1).join("/");
+}
+
+function isUpdateFileIncluded(relativePath) {
+    const normalized = relativePath.replace(/\\/g, "/");
+    const lower = normalized.toLowerCase();
+    const rootName = lower.split("/")[0];
+    if (updateExcludedRootNames.has(rootName)) return false;
+    if (lower.startsWith("database/runtime/")) return false;
+    if (lower === "bin/update_config.json") return false;
+    return !lower.startsWith("document/~$");
+}
+
+function getSelectedUpdateFiles(input) {
+    const files = Array.from(input.files || []).map((file) => ({
+        file,
+        relativePath: getUpdateRelativePath(file),
+    })).filter((entry) => isUpdateFileIncluded(entry.relativePath));
+    if (!files.length) throw new Error("更新対象ファイルがありません。");
+    if (files.length > 65535) throw new Error("更新対象ファイル数がZIP形式の上限を超えています。");
+    return files;
+}
+
+function createCrc32Table() {
+    const table = new Uint32Array(256);
+    for (let index = 0; index < table.length; index += 1) {
+        let value = index;
+        for (let bit = 0; bit < 8; bit += 1) {
+            value = (value & 1) ? (0xedb88320 ^ (value >>> 1)) : (value >>> 1);
+        }
+        table[index] = value >>> 0;
+    }
+    return table;
+}
+
+const updateCrc32Table = createCrc32Table();
+
+async function getFileCrc32(file, onRead) {
+    const reader = file.stream().getReader();
+    let crc = 0xffffffff;
+    try {
+        while (true) {
+            const result = await reader.read();
+            if (result.done) break;
+            for (const byte of result.value) {
+                crc = updateCrc32Table[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+            }
+            onRead(result.value.length);
+        }
+    } finally {
+        reader.releaseLock();
+    }
+    return (crc ^ 0xffffffff) >>> 0;
+}
+
+function getDosDateTime(lastModified) {
+    const date = new Date(lastModified || Date.now());
+    const year = Math.min(2107, Math.max(1980, date.getFullYear()));
+    return {
+        date: ((year - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate(),
+        time: (date.getHours() << 11) | (date.getMinutes() << 5) | Math.floor(date.getSeconds() / 2),
+    };
+}
+
+function createZipLocalHeader(nameBytes, file, crc32) {
+    const header = new Uint8Array(30 + nameBytes.length);
+    const view = new DataView(header.buffer);
+    view.setUint32(0, 0x04034b50, true);
+    view.setUint16(4, 20, true);
+    view.setUint16(6, 0x0800, true);
+    view.setUint16(8, 0, true);
+    const dos = getDosDateTime(file.lastModified);
+    view.setUint16(10, dos.time, true);
+    view.setUint16(12, dos.date, true);
+    view.setUint32(14, crc32, true);
+    view.setUint32(18, file.size, true);
+    view.setUint32(22, file.size, true);
+    view.setUint16(26, nameBytes.length, true);
+    view.setUint16(28, 0, true);
+    header.set(nameBytes, 30);
+    return header;
+}
+
+function createZipCentralHeader(nameBytes, file, crc32, localOffset) {
+    const header = new Uint8Array(46 + nameBytes.length);
+    const view = new DataView(header.buffer);
+    view.setUint32(0, 0x02014b50, true);
+    view.setUint16(4, 20, true);
+    view.setUint16(6, 20, true);
+    view.setUint16(8, 0x0800, true);
+    view.setUint16(10, 0, true);
+    const dos = getDosDateTime(file.lastModified);
+    view.setUint16(12, dos.time, true);
+    view.setUint16(14, dos.date, true);
+    view.setUint32(16, crc32, true);
+    view.setUint32(20, file.size, true);
+    view.setUint32(24, file.size, true);
+    view.setUint16(28, nameBytes.length, true);
+    view.setUint32(42, localOffset, true);
+    header.set(nameBytes, 46);
+    return header;
+}
+
+function createZipEndRecord(entryCount, centralSize, centralOffset) {
+    const record = new Uint8Array(22);
+    const view = new DataView(record.buffer);
+    view.setUint32(0, 0x06054b50, true);
+    view.setUint16(8, entryCount, true);
+    view.setUint16(10, entryCount, true);
+    view.setUint32(12, centralSize, true);
+    view.setUint32(16, centralOffset, true);
+    return record;
+}
+
+async function createUpdateZip(entries, onProgress) {
+    const encoder = new TextEncoder();
+    const fileBytes = entries.reduce((total, entry) => total + entry.file.size, 0);
+    const localParts = [];
+    const centralParts = [];
+    let localOffset = 0;
+    let readBytes = 0;
+
+    for (let index = 0; index < entries.length; index += 1) {
+        const entry = entries[index];
+        if (entry.file.size > 0xffffffff) throw new Error(`4GBを超えるファイルは送信できません: ${entry.relativePath}`);
+        const nameBytes = encoder.encode(entry.relativePath);
+        const crc32 = await getFileCrc32(entry.file, (length) => {
+            readBytes += length;
+            onProgress(fileBytes ? readBytes / fileBytes : 1, entry.relativePath);
+        });
+        const localHeader = createZipLocalHeader(nameBytes, entry.file, crc32);
+        localParts.push(localHeader, entry.file);
+        centralParts.push(createZipCentralHeader(nameBytes, entry.file, crc32, localOffset));
+        localOffset += localHeader.length + entry.file.size;
+        if (localOffset > 0xffffffff) throw new Error("更新ZIPが4GBを超えています。");
+    }
+
+    const centralSize = centralParts.reduce((total, part) => total + part.length, 0);
+    const zip = new Blob([
+        ...localParts,
+        ...centralParts,
+        createZipEndRecord(entries.length, centralSize, localOffset),
+    ], { type: "application/zip" });
+    if (zip.size > 512 * 1024 * 1024) throw new Error("更新ZIPが512MBを超えています。");
+    return zip;
+}
+
+async function sendUpdateZip(zip, fileName, onProgress) {
+    const chunkSize = 512 * 1024;
+    const started = await requestJson("/infomation_control/api/update-upload", {
+        method: "POST",
+        body: JSON.stringify({ operation: "start", fileName, size: zip.size }),
+    });
+    let uploadId = started.uploadId;
+    try {
+        let index = 0;
+        for (let offset = 0; offset < zip.size; offset += chunkSize) {
+            const buffer = await zip.slice(offset, Math.min(offset + chunkSize, zip.size)).arrayBuffer();
+            await requestJson("/infomation_control/api/update-upload", {
+                method: "POST",
+                body: JSON.stringify({
+                    operation: "chunk",
+                    uploadId,
+                    index,
+                    dataBase64: arrayBufferToBase64(buffer),
+                }),
+            });
+            index += 1;
+            onProgress(Math.min(offset + chunkSize, zip.size) / zip.size);
+        }
+        await requestJson("/infomation_control/api/update-upload", {
+            method: "POST",
+            body: JSON.stringify({ operation: "finish", uploadId }),
+        });
+        uploadId = "";
+    } finally {
+        if (uploadId) {
+            requestJson("/infomation_control/api/update-upload", {
+                method: "POST",
+                body: JSON.stringify({ operation: "cancel", uploadId }),
+            }).catch(() => {});
+        }
+    }
+}
+
+async function uploadSystemUpdate() {
+    const input = document.getElementById("update-file");
+    const button = document.getElementById("apply-update");
+    const progress = document.getElementById("update-progress");
+    const status = document.getElementById("update-status");
+    const entries = getSelectedUpdateFiles(input);
+    const sourceSize = entries.reduce((total, entry) => total + entry.file.size, 0);
+    if (!confirm(`infomation_system の更新対象 ${entries.length}ファイルを送信し、システムを再起動しますか？`)) return;
+
+    button.disabled = true;
+    progress.hidden = false;
+    progress.value = 0;
+    status.textContent = "更新ZIPを作成しています。";
+    try {
+        const zip = await createUpdateZip(entries, (ratio, path) => {
+            progress.value = Math.round(ratio * 40);
+            status.textContent = `ZIP作成中 ${progress.value}%: ${path}`;
+        });
+        const timestamp = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 17);
+        await sendUpdateZip(zip, `infomation_system_update_${timestamp}_browser.zip`, (ratio) => {
+            progress.value = 40 + Math.round(ratio * 60);
+            status.textContent = `送信中 ${progress.value}%`;
+        });
+        progress.value = 100;
+        status.textContent = `更新を受け付けました（${entries.length}ファイル / 元データ ${Math.round(sourceSize / 1024 / 1024)}MB）。検証・適用後に自動再起動します。`;
+        showToast("更新を受け付けました。まもなく再起動します。");
+    } catch (error) {
+        status.textContent = `更新失敗: ${error.message}`;
+        throw error;
+    } finally {
+        button.disabled = false;
+    }
 }
 
 async function runAction(action) {
@@ -357,15 +845,37 @@ document.querySelectorAll(".tab").forEach((button) => {
     button.addEventListener("click", () => {
         document.querySelectorAll(".tab").forEach((item) => item.classList.toggle("is-active", item === button));
         document.querySelectorAll(".panel").forEach((panel) => panel.classList.toggle("is-active", panel.id === `panel-${button.dataset.tab}`));
+        if (button.dataset.tab === "system") loadScreenList().catch((error) => showToast(error.message, true));
     });
 });
 
 document.getElementById("refresh-button").addEventListener("click", loadState);
 document.querySelectorAll("[data-disaster-test]").forEach((button) => {
-    button.addEventListener("click", () => runAction(collectDisasterTestPayload(button.dataset.disasterTest)).catch((error) => showToast(error.message, true)));
+    button.addEventListener("click", () => runAction(collectDisasterTestPayload(
+        button.dataset.disasterTest,
+        button.dataset.earthquakeType || "",
+        button.dataset.eewType || "announcement",
+    )).catch((error) => showToast(error.message, true)));
 });
-document.getElementById("add-quake-point").addEventListener("click", () => addQuakeTestPoint());
-document.getElementById("add-tsunami-area").addEventListener("click", () => addTsunamiTestArea());
+document.getElementById("add-eew-area").addEventListener("click", () => changeEewAssignments(true));
+document.getElementById("add-all-eew-areas").addEventListener("click", () => changeEewAssignments(true, true));
+document.getElementById("remove-eew-area").addEventListener("click", () => changeEewAssignments(false));
+document.getElementById("remove-all-eew-areas").addEventListener("click", () => changeEewAssignments(false, true));
+document.getElementById("add-quake-area").addEventListener("click", () => addQuakeAssignments("area"));
+document.getElementById("add-all-quake-areas").addEventListener("click", () => addQuakeAssignments("area", true));
+document.getElementById("remove-quake-area").addEventListener("click", () => removeQuakeAssignments("area"));
+document.getElementById("remove-all-quake-areas").addEventListener("click", () => removeQuakeAssignments("area", true));
+document.getElementById("add-quake-point").addEventListener("click", () => addQuakeAssignments("point"));
+document.getElementById("add-all-quake-points").addEventListener("click", () => addQuakeAssignments("point", true));
+document.getElementById("remove-quake-point").addEventListener("click", () => removeQuakeAssignments("point"));
+document.getElementById("remove-all-quake-points").addEventListener("click", () => removeQuakeAssignments("point", true));
+document.getElementById("add-tsunami-area").addEventListener("click", () => addTsunamiAssignments());
+document.getElementById("add-all-tsunami-areas").addEventListener("click", () => addTsunamiAssignments(true));
+document.getElementById("remove-tsunami-area").addEventListener("click", () => removeTsunamiAssignments());
+document.getElementById("remove-all-tsunami-areas").addEventListener("click", () => removeTsunamiAssignments(true));
+document.getElementById("quake-area-scale").addEventListener("change", () => renderQuakeAssignments("area"));
+document.getElementById("quake-point-scale").addEventListener("change", () => renderQuakeAssignments("point"));
+document.getElementById("tsunami-grade-select").addEventListener("change", renderTsunamiAssignments);
 document.getElementById("bus-test-form").addEventListener("submit", (event) => {
     event.preventDefault();
     runAction({ action: "busTest", ...formToObject(event.currentTarget) }).catch((error) => showToast(error.message, true));
@@ -456,6 +966,42 @@ document.getElementById("pause-signal").addEventListener("click", async () => {
 document.getElementById("resume-signal").addEventListener("click", async () => {
     try { await requestJson("/time-signal/resume"); await loadTimeSignalStatus(); showToast("時報を再開しました。"); } catch (error) { showToast(error.message, true); }
 });
+document.querySelectorAll("[data-capture-screen]").forEach((button) => {
+    button.addEventListener("click", () => captureScreen(Number(button.dataset.captureScreen), button));
+});
+document.getElementById("display-wake").addEventListener("click", () => {
+    runSystemCommand("/time-signal/display/wake", "画面を点灯しました。").catch((error) => showToast(error.message, true));
+});
+document.getElementById("display-off").addEventListener("click", () => {
+    if (!confirm("2画面を消灯しますか？")) return;
+    runSystemCommand("/time-signal/display/off", "画面を消灯しました。").catch((error) => showToast(error.message, true));
+});
+document.getElementById("restart-system").addEventListener("click", () => {
+    if (!confirm("インフォメーションシステムを再起動しますか？")) return;
+    runSystemCommand("/time-signal/system/restart", "再起動を開始しました。").catch((error) => showToast(error.message, true));
+});
+document.getElementById("apply-update").addEventListener("click", () => {
+    uploadSystemUpdate().catch((error) => showToast(error.message, true));
+});
+document.getElementById("save-update-source-path").addEventListener("click", () => {
+    try {
+        saveUpdateSourcePath();
+    } catch (error) {
+        showToast(error.message, true);
+    }
+});
+document.getElementById("update-file").addEventListener("change", (event) => {
+    try {
+        detectSelectedUpdateSourcePath(event.currentTarget);
+        const entries = getSelectedUpdateFiles(event.currentTarget);
+        const sourceSize = entries.reduce((total, entry) => total + entry.file.size, 0);
+        document.getElementById("update-status").textContent =
+            `${entries.length}ファイルを更新対象として選択しました（${Math.round(sourceSize / 1024 / 1024)}MB）。`;
+    } catch (error) {
+        document.getElementById("update-status").textContent = error.message;
+        showToast(error.message, true);
+    }
+});
 document.getElementById("load-network").addEventListener("click", loadNetworkHistory);
 document.getElementById("log-type").addEventListener("change", () => {
     updateLogControls();
@@ -463,10 +1009,10 @@ document.getElementById("log-type").addEventListener("change", () => {
 });
 
 setDefaultExpiry();
-addQuakeTestPoint();
-addTsunamiTestArea();
+applyUpdateSourcePath(getStoredUpdateSourcePath());
 updateLogControls();
 updateTimetableSectionOptions();
+loadDisasterReference().catch((error) => showToast(`災害地点データを取得できません: ${error.message}`, true));
 loadState();
 loadTimeSignalStatus();
 loadNetworkHistory();

@@ -11,6 +11,8 @@ $timeSignalPausePath = Join-Path $projectDir "temp\time_signal_pause_until.txt"
 $timeSignalIntervalPath = Join-Path $projectDir "temp\time_signal_interval_minutes.txt"
 $timeSignalVolume = 1.0
 $displayManualAwakePath = Join-Path $projectDir "temp\display_manual_awake.flag"
+$displayEmergencyAwakeUntilPath = Join-Path $projectDir "temp\display_emergency_awake_until.txt"
+$displayEmergencyWakeRequestPath = Join-Path $projectDir "temp\display_emergency_wake_request.txt"
 $timeSignalControlPort = 18765
 $timeSignalControlListener = $null
 $sqliteHelperPath = Join-Path $projectDir "network_check\network_sqlite.ps1"
@@ -70,6 +72,16 @@ public static class TimeSignalDisplayPowerNativeMethods
         int dy,
         int dwData,
         UIntPtr dwExtraInfo);
+
+    [DllImport("user32.dll")]
+    public static extern void keybd_event(
+        byte bVk,
+        byte bScan,
+        uint dwFlags,
+        UIntPtr dwExtraInfo);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern uint SetThreadExecutionState(uint esFlags);
 }
 "@
 
@@ -87,9 +99,40 @@ function Send-DisplayPowerOffCommand {
 }
 
 function Send-DisplayWakeCommand {
+    $hwndBroadcast = [IntPtr]::new(0xffff)
+    $wmSysCommand = 0x0112
+    $scMonitorPower = 0xF170
+    $monitorPowerOn = -1
+    $esContinuous = [uint32]2147483648
+    $esSystemRequired = [uint32]0x00000001
+    $esDisplayRequired = [uint32]0x00000002
+    $virtualKeyShift = [byte]0x10
+    $keyEventKeyUp = [uint32]0x0002
+
+    [TimeSignalDisplayPowerNativeMethods]::SetThreadExecutionState(
+        $esContinuous -bor $esSystemRequired -bor $esDisplayRequired) | Out-Null
+    [TimeSignalDisplayPowerNativeMethods]::PostMessage(
+        $hwndBroadcast,
+        $wmSysCommand,
+        [IntPtr]::new($scMonitorPower),
+        [IntPtr]::new($monitorPowerOn)) | Out-Null
     [TimeSignalDisplayPowerNativeMethods]::mouse_event(0x0001, 1, 0, 0, [UIntPtr]::Zero)
     Start-Sleep -Milliseconds 80
     [TimeSignalDisplayPowerNativeMethods]::mouse_event(0x0001, -1, 0, 0, [UIntPtr]::Zero)
+    [TimeSignalDisplayPowerNativeMethods]::keybd_event($virtualKeyShift, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 50
+    [TimeSignalDisplayPowerNativeMethods]::keybd_event($virtualKeyShift, 0, $keyEventKeyUp, [UIntPtr]::Zero)
+}
+
+function Send-DisplayWakeBurst {
+    param([int]$Count = 3)
+
+    for ($index = 0; $index -lt $Count; $index++) {
+        Send-DisplayWakeCommand
+        if ($index -lt ($Count - 1)) {
+            Start-Sleep -Milliseconds 250
+        }
+    }
 }
 
 function Set-DisplayManualAwake {
@@ -103,10 +146,61 @@ function Clear-DisplayManualAwake {
     Remove-Item -LiteralPath $displayManualAwakePath -Force -ErrorAction SilentlyContinue
 }
 
+function Clear-DisplayEmergencyAwake {
+    Remove-Item -LiteralPath $displayEmergencyAwakeUntilPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $displayEmergencyWakeRequestPath -Force -ErrorAction SilentlyContinue
+}
+
+function Set-DisplayEmergencyAwakeUntil {
+    param([int]$Minutes)
+
+    $requestedUntil = (Get-Date).AddMinutes($Minutes)
+    $currentUntil = $null
+    if (Test-Path -LiteralPath $displayEmergencyAwakeUntilPath -PathType Leaf) {
+        $currentText = Get-Content -Raw -Encoding UTF8 -LiteralPath $displayEmergencyAwakeUntilPath
+        $parsed = [datetime]::MinValue
+        if ([datetime]::TryParse($currentText.Trim(), [ref]$parsed)) {
+            $currentUntil = $parsed
+        }
+    }
+
+    $effectiveUntil = if ($currentUntil -and $currentUntil -gt $requestedUntil) {
+        $currentUntil
+    } else {
+        $requestedUntil
+    }
+    [IO.File]::WriteAllText(
+        $displayEmergencyAwakeUntilPath,
+        $effectiveUntil.ToString("o"),
+        [Text.UTF8Encoding]::new($false))
+
+    # 同じ点灯期限内の続報も新しい要求として検出できるよう、毎回一意なIDを保存する。
+    $requestId = [guid]::NewGuid().ToString("N")
+    [IO.File]::WriteAllText(
+        $displayEmergencyWakeRequestPath,
+        $requestId,
+        [Text.UTF8Encoding]::new($false))
+    return [ordered]@{
+        Until = $effectiveUntil
+        RequestId = $requestId
+    }
+}
+
 function Get-DisplayPowerStatusJson {
+    $emergencyRequestId = ""
+    if (Test-Path -LiteralPath $displayEmergencyWakeRequestPath -PathType Leaf) {
+        try {
+            $emergencyRequestId = (Get-Content -Raw -Encoding UTF8 -LiteralPath $displayEmergencyWakeRequestPath).Trim()
+        }
+        catch {
+            $emergencyRequestId = ""
+        }
+    }
     $payload = [ordered]@{
         ok = $true
         manualAwake = (Test-Path -LiteralPath $displayManualAwakePath -PathType Leaf)
+        emergencyAwake = (Test-Path -LiteralPath $displayEmergencyAwakeUntilPath -PathType Leaf)
+        emergencyRequestId = $emergencyRequestId
         now = (Get-Date).ToString("o")
     }
     return ($payload | ConvertTo-Json -Compress)
@@ -457,12 +551,54 @@ function Get-NetworkStatusJson {
 }
 
 function Get-RestartAcceptedJson {
-    Start-Process shutdown.exe -ArgumentList "/r /t 0" -WindowStyle Hidden
+    $restartScriptPath = Join-Path $projectDir "bin\restart_clean.ps1"
+    Start-Process `
+        -FilePath "powershell.exe" `
+        -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$restartScriptPath`"" `
+        -WindowStyle Hidden
     return Get-JsonResponse ([ordered]@{
         ok = $true
         restarting = $true
         now = (Get-Date).ToString("o")
     })
+}
+
+function Start-EarthquakeBridgeProcess {
+    $runtimeDir = Join-Path $projectDir "earthquake\SignageBridgeRuntime"
+    $bridgePath = Join-Path $runtimeDir "EarthquakeSignageBridge.exe"
+    if (-not (Test-Path -LiteralPath $bridgePath -PathType Leaf)) {
+        throw "地震情報ブリッジが見つかりません: $bridgePath"
+    }
+
+    return Start-Process `
+        -FilePath $bridgePath `
+        -ArgumentList @($projectDir) `
+        -WorkingDirectory $runtimeDir `
+        -WindowStyle Hidden `
+        -PassThru
+}
+
+function Restart-EarthquakeMonitor {
+    $monitorProcesses = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.Name -eq "powershell.exe" -and
+            [string]$_.CommandLine -like "*earthquake_monitor.ps1*"
+        })
+    foreach ($monitor in $monitorProcesses) {
+        Stop-Process -Id $monitor.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+
+    Get-Process -Name "EarthquakeSignageBridge" -ErrorAction SilentlyContinue |
+        Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 500
+
+    $process = Start-EarthquakeBridgeProcess
+    $script:earthquakeMonitorMissingBridgeChecks = 0
+    Write-TimeSignalLog -Level "WARN" -Message "地震情報ブリッジを強制再起動しました。PID=$($process.Id)"
+    return Get-JsonResponse -Payload @{
+        ok = $true
+        bridgeProcessId = $process.Id
+    }
 }
 
 function Get-TimeSignalIntervalMinutes {
@@ -607,8 +743,14 @@ function Invoke-TimeSignalControlRequest {
     param([string]$Target)
 
     $uri = [Uri]::new("http://127.0.0.1:$timeSignalControlPort$Target")
+    if ($uri.AbsolutePath -eq "/time-signal/display/status") {
+        return Get-DisplayPowerStatusJson
+    }
+
     if ($uri.AbsolutePath -eq "/time-signal/display/off") {
         Clear-DisplayManualAwake
+        # 手動消灯後は古い緊急点灯状態を残さず、次の速報だけで再点灯させる。
+        Clear-DisplayEmergencyAwake
         Send-DisplayPowerOffCommand
         return Get-DisplayPowerStatusJson
     }
@@ -617,6 +759,25 @@ function Invoke-TimeSignalControlRequest {
         Set-DisplayManualAwake
         Send-DisplayWakeCommand
         return Get-DisplayPowerStatusJson
+    }
+
+    if ($uri.AbsolutePath -eq "/time-signal/display/emergency-wake") {
+        $minutesText = Get-QueryValue -Uri $uri -Name "minutes"
+        $minutes = 0
+        if (-not [int]::TryParse($minutesText, [ref]$minutes)) {
+            $minutes = 3
+        }
+        $minutes = [Math]::Max(1, [Math]::Min(120, $minutes))
+        $wakeRequest = Set-DisplayEmergencyAwakeUntil -Minutes $minutes
+        # 緊急情報で点灯した画面は、利用者が手動消灯するまで自動消灯しない。
+        Set-DisplayManualAwake
+        Send-DisplayWakeBurst
+        Write-TimeSignalLog -Message "緊急情報受信により画面を点灯しました。点灯期限=$($wakeRequest.Until.ToString('yyyy-MM-dd HH:mm:ss')) 要求ID=$($wakeRequest.RequestId)"
+        return Get-JsonResponse -Payload @{
+            ok = $true
+            emergencyAwakeUntil = $wakeRequest.Until.ToString("o")
+            requestId = $wakeRequest.RequestId
+        }
     }
 
     if ($uri.AbsolutePath -eq "/time-signal/network/status") {
@@ -655,6 +816,10 @@ function Invoke-TimeSignalControlRequest {
 
     if ($uri.AbsolutePath -eq "/time-signal/system/restart") {
         return Get-RestartAcceptedJson
+    }
+
+    if ($uri.AbsolutePath -eq "/time-signal/earthquake/restart-monitor") {
+        return Restart-EarthquakeMonitor
     }
 
     if ($uri.AbsolutePath -eq "/time-signal/interval") {
@@ -749,7 +914,8 @@ function Process-TimeSignalControlRequests {
         $processedRequests++
         $client = $script:timeSignalControlListener.AcceptTcpClient()
         try {
-            $client.ReceiveTimeout = 1000
+            # 管理画面の更新ZIPは分割送信されるため、低速な無線LANでも1チャンクを受信できる時間を確保する。
+            $client.ReceiveTimeout = 30000
             $stream = $client.GetStream()
             $reader = [IO.StreamReader]::new($stream, [Text.Encoding]::UTF8, $false, 1024, $true)
             $requestLine = $reader.ReadLine()
@@ -1046,6 +1212,48 @@ function Start-Time-Signal {
     if (-not (Play-Sound $hourFile)) { return }
     [void](Play-Sound $minFile)
 }
+
+$lastEarthquakeMonitorCheck = Get-Date
+$earthquakeMonitorMissingBridgeChecks = 0
+
+function Ensure-EarthquakeMonitorRunning {
+    $now = Get-Date
+    if (($now - $script:lastEarthquakeMonitorCheck).TotalSeconds -lt 15) { return }
+    $script:lastEarthquakeMonitorCheck = $now
+
+    $bridge = Get-Process -Name "EarthquakeSignageBridge" -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($bridge) {
+        $script:earthquakeMonitorMissingBridgeChecks = 0
+        return
+    }
+
+    $script:earthquakeMonitorMissingBridgeChecks++
+
+    $monitorProcesses = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.Name -eq "powershell.exe" -and
+            [string]$_.CommandLine -like "*earthquake_monitor.ps1*"
+        })
+    if ($monitorProcesses.Count -gt 0 -and $script:earthquakeMonitorMissingBridgeChecks -lt 2) { return }
+
+    foreach ($monitor in $monitorProcesses) {
+        Stop-Process -Id $monitor.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    if ($monitorProcesses.Count -gt 0) { Start-Sleep -Milliseconds 500 }
+
+    try {
+        $process = Start-EarthquakeBridgeProcess
+    }
+    catch {
+        Write-TimeSignalLog -Level "WARN" -Message "地震情報ブリッジを自動起動できませんでした: $($_.Exception.Message)"
+        return
+    }
+
+    $script:earthquakeMonitorMissingBridgeChecks = 0
+    Write-TimeSignalLog -Level "WARN" -Message "停止していた地震情報ブリッジを自動起動しました。PID=$($process.Id)"
+}
+
 # メインループ（秒同期）
 try {
     # 表示画面のキャッシュ状態に依存せず、常駐APIの起動時に情報取得処理を保証する。
@@ -1065,6 +1273,7 @@ while ($true) {
     # HTTP制御に待たされても時報枠を逃さないよう、時報判定を先に行う。
     Start-Time-Signal
     Process-TimeSignalControlRequests
+    Ensure-EarthquakeMonitorRunning
 
     # 次の秒境界まで待つ
     $now = Get-Date

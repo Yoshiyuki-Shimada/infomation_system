@@ -14,11 +14,14 @@ button { border: 1px solid #13c8ef; background: #087ca8; color: #fff; padding: 8
 button.secondary { background: #25354b; border-color: #718096; }
 button.danger { background: #a42a35; border-color: #ef5967; }
 button:disabled { opacity: 0.45; cursor: default; }
+.button-link { display: inline-flex; min-height: 44px; align-items: center; justify-content: center; border: 1px solid #13c8ef; background: #25354b; color: #fff; padding: 8px 18px; text-decoration: none; }
+.button-link.is-disabled { opacity: 0.45; pointer-events: none; }
 input, select, textarea { width: 100%; border: 1px solid #4c6688; background: #0c1d36; color: #fff; padding: 8px 10px; }
 textarea { min-height: 76px; resize: vertical; }
 label { display: grid; gap: 5px; color: #b9c8dd; font-size: 0.88rem; }
 h1, h2 { margin: 0; }
 h3 { margin: 0 0 10px; color: #ffe766; font-size: 1rem; }
+h4 { margin: 8px 0 0; color: #bcefff; font-size: 0.92rem; }
 h1 { font-size: 1.25rem; }
 h2 { padding: 16px 0 10px; font-size: 1.05rem; color: #49def7; border-bottom: 1px solid #274361; }
 p { margin: 5px 0; }
@@ -41,6 +44,17 @@ main { max-width: 1500px; margin: 0 auto; padding: 14px 18px 50px; }
 .check-label input { width: 24px; min-height: 24px; }
 .command-row { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; padding: 14px 0; }
 .command-row label { min-width: 210px; }
+.command-row.compact { padding: 8px 0 0; }
+.system-actions button { min-width: 150px; }
+.screenshot-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding: 14px 0; }
+.screenshot-preview { min-width: 0; margin: 0; padding: 12px; border: 1px solid #365475; background: #0a1930; }
+.screenshot-preview figcaption { margin-bottom: 8px; color: #ffe766; font-weight: 700; }
+.screenshot-image-wrap { display: grid; min-height: 220px; place-items: center; overflow: hidden; background: #020712; border: 1px solid #274361; }
+.screenshot-image-wrap img { display: block; width: 100%; height: auto; max-height: 58vh; object-fit: contain; }
+.screenshot-image-wrap img:not([src]) { visibility: hidden; }
+.update-source-settings, .update-controls { display: grid; grid-template-columns: minmax(260px, 1fr) auto; gap: 12px; align-items: end; padding: 14px 0; }
+.update-source-settings { padding-bottom: 0; }
+#update-progress { width: 100%; height: 20px; accent-color: #13c8ef; }
 .data-list { display: grid; gap: 6px; }
 .data-list > div { padding: 9px 12px; background: #0c1d36; border-left: 4px solid #ffe766; }
 .disaster-test-grid { display: grid; grid-template-columns: repeat(3, minmax(240px, 1fr)); gap: 12px; padding: 14px 0; }
@@ -49,6 +63,28 @@ main { max-width: 1500px; margin: 0 auto; padding: 14px 18px 50px; }
 .test-point-row { display: grid; grid-template-columns: 0.8fr 1.4fr 0.7fr auto; gap: 7px; align-items: end; }
 .test-point-row.tsunami { grid-template-columns: 1.2fr 1fr auto; }
 .test-point-row button { padding: 6px 10px; }
+.selection-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; align-items: end; }
+.selection-row.quake-point-picker { grid-template-columns: 0.8fr 1.4fr 0.7fr auto; }
+.selection-row.quake-area-picker { grid-template-columns: 0.8fr 1.4fr 0.7fr auto; }
+.selection-row.tsunami-area-picker { grid-template-columns: 1.2fr 1fr auto; }
+.selected-test-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 7px 9px; background: #102542; border-left: 4px solid #49def7; }
+.selected-test-item.quake-test-point, .selected-test-item.tsunami-test-area { grid-template-columns: minmax(0, 1fr) auto auto; }
+.selected-test-item strong { color: #ffe766; }
+.selected-test-item button { min-height: 34px; padding: 4px 9px; }
+.test-detail-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+.eew-test-buttons { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+.earthquake-test-buttons { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+.assignment-category { display: flex; justify-content: flex-end; }
+.assignment-category label { width: min(210px, 100%); }
+.assignment-picker { display: grid; grid-template-columns: minmax(0, 1fr) 58px minmax(0, 1fr); gap: 12px; align-items: stretch; }
+.assignment-picker label { min-width: 0; }
+.assignment-picker select[multiple] { min-height: 330px; padding: 4px; }
+.assignment-picker option { padding: 5px 8px; }
+.assignment-picker optgroup { color: #ffe766; }
+.assignment-picker optgroup option { color: #fff; }
+.assignment-target { color: #ff525f; font-weight: 700; }
+.assignment-buttons { display: grid; align-content: center; gap: 12px; }
+.assignment-buttons button { min-width: 54px; padding: 7px; }
 .table-wrap input[type="checkbox"] { width: 22px; min-height: 22px; }
 .table-wrap { width: 100%; margin-top: 14px; overflow: auto; border: 1px solid #274361; }
 table { width: 100%; border-collapse: collapse; min-width: 760px; }
@@ -64,15 +100,18 @@ td pre { max-width: 720px; margin: 0; white-space: pre-wrap; overflow-wrap: anyw
     .topbar { position: static; }
     .tabs { top: 0; }
     main { padding: 10px 10px 40px; }
-    .form-grid, .route-form, .timetable-filter-form, .timetable-entry-form, .disaster-test-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .form-grid, .route-form, .timetable-filter-form, .timetable-entry-form, .disaster-test-grid, .screenshot-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .wide { grid-column: span 2; }
 }
 
 @media (max-width: 520px) {
     h1 { font-size: 1rem; }
     .topbar { padding: 10px; }
-    .form-grid, .route-form, .timetable-filter-form, .timetable-entry-form, .disaster-test-grid { grid-template-columns: 1fr; }
+    .form-grid, .route-form, .timetable-filter-form, .timetable-entry-form, .disaster-test-grid, .screenshot-grid, .update-source-settings, .update-controls { grid-template-columns: 1fr; }
     .wide { grid-column: span 1; }
     .command-row > * { width: 100%; }
-    .test-point-row, .test-point-row.tsunami { grid-template-columns: 1fr; }
+    .test-point-row, .test-point-row.tsunami, .selection-row, .selection-row.quake-point-picker, .selection-row.quake-area-picker, .selection-row.tsunami-area-picker, .test-detail-grid, .eew-test-buttons, .earthquake-test-buttons { grid-template-columns: 1fr; }
+    .assignment-picker { grid-template-columns: 1fr; }
+    .assignment-picker select[multiple] { min-height: 220px; }
+    .assignment-buttons { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }

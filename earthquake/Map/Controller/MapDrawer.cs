@@ -20,6 +20,10 @@ namespace Map.Controller
         public bool HideNote { get; set; }
         /// <summary>希望するアスペクト比率 (N:1 の N 部分)</summary>
         public double PreferedAspectRatio { get; set; }
+        /// <summary>トリム時に上下へ追加する緯度余白</summary>
+        public double TrimLatitudeMargin { get; set; } = 1;
+        /// <summary>トリム時に左右へ追加する経度余白</summary>
+        public double TrimLongitudeMargin { get; set; } = 1.5;
         /// <summary>描画しない（トリム・凡例表示のみ）</summary>
         public bool HideDraw { get; set; }
         public bool Trim { get; set; }
@@ -44,7 +48,7 @@ namespace Map.Controller
         {
             // 画像ロード
             var mapData = MapLoader.Load(MapType);
-            var image = mapData.Image;
+            using var image = mapData.Image;
 
             // 描画対象を準備 ----
             var drawers = new List<AbstractDrawer>();
@@ -135,7 +139,10 @@ namespace Map.Controller
             }
 
             // トリム処理
-            if (MapType != MapType.WORLD_512 && MapType != MapType.WORLD_1024 && Trim)
+            if (MapType != MapType.WORLD_512 &&
+                MapType != MapType.WORLD_1024 &&
+                Trim &&
+                drawers.Any(drawer => drawer.CalcDrawLTRB() != null))
             {
                 var trans = new Transformation
                 {
@@ -146,12 +153,12 @@ namespace Map.Controller
                 };
                 var coordinates = drawers.Select(e => e.CalcDrawLTRB()).Where(e => e != null);
                 var lt = trans.Geo2Pixel(new GeoCoordinate(
-                    coordinates.Select(e => e.TopLatitude).Max() + 1,
-                    coordinates.Select(e => e.LeftLongitude).Min() - 1.5
+                    coordinates.Select(e => e.TopLatitude).Max() + TrimLatitudeMargin,
+                    coordinates.Select(e => e.LeftLongitude).Min() - TrimLongitudeMargin
                 ));
                 var rb = trans.Geo2Pixel(new GeoCoordinate(
-                    coordinates.Select(e => e.BottomLatitude).Min() - 1,
-                    coordinates.Select(e => e.RightLongitude).Max() + 1.5
+                    coordinates.Select(e => e.BottomLatitude).Min() - TrimLatitudeMargin,
+                    coordinates.Select(e => e.RightLongitude).Max() + TrimLongitudeMargin
                 ));
 
                 var margin = MapType == MapType.JAPAN_1024 ? 240 : 480;

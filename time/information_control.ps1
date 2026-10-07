@@ -2,7 +2,21 @@
 $informationControlDbPath = Join-Path $runtimeDbDir "information_control.sqlite3"
 $informationControlStatePath = Join-Path $tempDir "control_data.js"
 $informationControlWebRoot = Join-Path $projectDir "infomation_control"
+$informationControlUploadRoot = Join-Path $projectDir "_update\uploads"
+$informationControlUpdateInbox = Join-Path $projectDir "_update\management_inbox"
+$informationControlUpdateConfigPath = Join-Path $projectDir "bin\update_config.json"
+$informationControlMaximumUpdateBytes = 536870912
 $script:informationControlInitialized = $false
+$script:disasterReferenceData = $null
+$script:japanesePrefectureOrder = @(
+    "北海道", "青森県", "岩手県", "宮城県", "秋田県", "山形県", "福島県",
+    "茨城県", "栃木県", "群馬県", "埼玉県", "千葉県", "東京都", "神奈川県",
+    "新潟県", "富山県", "石川県", "福井県", "山梨県", "長野県", "岐阜県",
+    "静岡県", "愛知県", "三重県", "滋賀県", "京都府", "大阪府", "兵庫県",
+    "奈良県", "和歌山県", "鳥取県", "島根県", "岡山県", "広島県", "山口県",
+    "徳島県", "香川県", "愛媛県", "高知県", "福岡県", "佐賀県", "長崎県",
+    "熊本県", "大分県", "宮崎県", "鹿児島県", "沖縄県"
+)
 $timetableImportModulePath = Join-Path $PSScriptRoot "timetable_import.ps1"
 if (Test-Path -LiteralPath $timetableImportModulePath -PathType Leaf) {
     . $timetableImportModulePath
@@ -30,6 +44,136 @@ function Invoke-ControlJsonQuery {
         -SqliteExePath $sqliteExePath `
         -DatabasePath $informationControlDbPath `
         -Sql $Sql)
+}
+
+function Get-ConverterDictionaryOptions {
+    param([string]$DictionaryName)
+
+    $path = Join-Path $projectDir "earthquake\Map\Model\EEWConverter.cs"
+    $source = [IO.File]::ReadAllText($path, [Text.Encoding]::UTF8)
+    $dictionaryPattern = "(?s)$([regex]::Escape($DictionaryName))\s*=\s*new\(\)\s*\{(?<body>.*?)\n\s*\};"
+    $dictionaryMatch = [regex]::Match($source, $dictionaryPattern)
+    if (-not $dictionaryMatch.Success) { return @() }
+
+    return @([regex]::Matches($dictionaryMatch.Groups["body"].Value, '\{\s*(?<code>\d+)\s*,\s*"(?<name>[^"]+)"\s*\}') | ForEach-Object {
+        [ordered]@{
+            code = [int]$_.Groups["code"].Value
+            name = $_.Groups["name"].Value
+        }
+    })
+}
+
+function Get-PrefectureOrder {
+    param([string]$Prefecture)
+
+    $index = [array]::IndexOf($script:japanesePrefectureOrder, $Prefecture)
+    return $(if ($index -ge 0) { $index } else { [int]::MaxValue })
+}
+
+function Get-ObservationPointOptions {
+    $path = Join-Path $projectDir "earthquake\Map\Resources\Points\Stations.csv"
+    $rows = Get-Content -LiteralPath $path -Encoding UTF8 |
+        ConvertFrom-Csv -Header "pref", "name", "latitude", "longitude", "source"
+    $unique = @{}
+    foreach ($row in $rows) {
+        $key = "$($row.pref)|$($row.name)"
+        if (-not $unique.ContainsKey($key)) {
+            $unique[$key] = [ordered]@{ pref = [string]$row.pref; name = [string]$row.name }
+        }
+    }
+    return @($unique.Values | Sort-Object { Get-PrefectureOrder $_.pref }, { $_.name })
+}
+
+function Get-ObservationAreaOptions {
+    $path = Join-Path $projectDir "earthquake\Map\Resources\Points\Areas.csv"
+    $rows = Get-Content -LiteralPath $path -Encoding UTF8 |
+        Select-Object -Skip 1 |
+        ConvertFrom-Csv -Header "pref", "name", "latitude", "longitude"
+    return @($rows | ForEach-Object {
+        [ordered]@{ pref = [string]$_.pref; name = [string]$_.name }
+    } | Sort-Object { Get-PrefectureOrder $_.pref }, { $_.name })
+}
+
+function Get-HypocenterOptions {
+    $hypocenters = @(Get-ConverterDictionaryOptions -DictionaryName "code2Hypocenter")
+    $areaPath = Join-Path $projectDir "earthquake\Map\Resources\Points\Areas.csv"
+    $areaRows = @(Get-Content -LiteralPath $areaPath -Encoding UTF8 |
+        Select-Object -Skip 1 |
+        ConvertFrom-Csv -Header "pref", "name", "latitude", "longitude")
+    $aliases = @{
+        "紀伊水道" = "和歌山県"
+        "大阪湾" = "大阪府"
+        "播磨灘" = "兵庫県"
+        "淡路島付近" = "兵庫県"
+        "若狭湾" = "福井県"
+        "瀬戸内海" = "岡山県"
+        "安芸灘" = "広島県"
+        "周防灘" = "山口県"
+        "伊予灘" = "愛媛県"
+        "豊後水道" = "大分県"
+        "土佐湾" = "高知県"
+        "東京湾" = "東京都"
+        "相模湾" = "神奈川県"
+        "三河湾" = "愛知県"
+        "伊勢湾" = "三重県"
+        "富山湾" = "富山県"
+        "有明海" = "熊本県"
+        "橘湾" = "長崎県"
+        "鹿児島湾" = "鹿児島県"
+    }
+
+    return @($hypocenters | ForEach-Object {
+        $hypocenter = $_
+        $targetPref = $null
+        foreach ($pref in $script:japanesePrefectureOrder) {
+            $stem = $pref -replace "[都道府県]$", ""
+            if ($hypocenter.name -like "*$stem*") {
+                $targetPref = $pref
+                break
+            }
+        }
+        if (-not $targetPref -and $aliases.ContainsKey([string]$hypocenter.name)) {
+            $targetPref = $aliases[[string]$hypocenter.name]
+        }
+
+        $coordinateRows = @($areaRows | Where-Object pref -eq $targetPref)
+        $latitude = $null
+        $longitude = $null
+        if ($coordinateRows.Count -gt 0) {
+            $latitude = ($coordinateRows | Measure-Object -Property latitude -Average).Average
+            $longitude = ($coordinateRows | Measure-Object -Property longitude -Average).Average
+        }
+
+        [ordered]@{
+            code = [int]$hypocenter.code
+            name = [string]$hypocenter.name
+            latitude = $latitude
+            longitude = $longitude
+        }
+    })
+}
+
+function Get-TsunamiAreaOptions {
+    $path = Join-Path $projectDir "earthquake\Map\Resources\Points\TsunamiAreaCodes.csv"
+    return @(Get-Content -LiteralPath $path -Encoding UTF8 | ForEach-Object {
+        $parts = $_ -split ",", 2
+        if ($parts.Count -eq 2) {
+            [ordered]@{ code = [int]$parts[0]; name = [string]$parts[1] }
+        }
+    })
+}
+
+function Get-DisasterReferenceData {
+    if ($script:disasterReferenceData) { return $script:disasterReferenceData }
+
+    $script:disasterReferenceData = [ordered]@{
+        eewAreas = @(Get-ConverterDictionaryOptions -DictionaryName "code2AreaName")
+        hypocenters = @(Get-HypocenterOptions)
+        observationAreas = @(Get-ObservationAreaOptions)
+        observationPoints = @(Get-ObservationPointOptions)
+        tsunamiAreas = @(Get-TsunamiAreaOptions)
+    }
+    return $script:disasterReferenceData
 }
 
 function ConvertFrom-ControlJavaScriptObject {
@@ -407,6 +551,284 @@ function Get-ControlJsonResponse {
     return New-ControlResponse -Body ($Payload | ConvertTo-Json -Depth 30 -Compress)
 }
 
+function Get-ControlScreenList {
+    Add-Type -AssemblyName System.Windows.Forms
+    $screens = @([Windows.Forms.Screen]::AllScreens | Sort-Object `
+        @{ Expression = { if ($_.Primary) { 0 } else { 1 } } }, `
+        @{ Expression = { $_.Bounds.X } }, `
+        @{ Expression = { $_.Bounds.Y } })
+
+    $result = for ($index = 0; $index -lt $screens.Count; $index++) {
+        $screen = $screens[$index]
+        [ordered]@{
+            number = $index + 1
+            deviceName = $screen.DeviceName
+            primary = $screen.Primary
+            x = $screen.Bounds.X
+            y = $screen.Bounds.Y
+            width = $screen.Bounds.Width
+            height = $screen.Bounds.Height
+        }
+    }
+    return @($result)
+}
+
+function Get-ControlScreenshot {
+    param([int]$ScreenNumber)
+
+    Add-Type -AssemblyName System.Drawing
+    $screens = @(Get-ControlScreenList)
+    if ($ScreenNumber -lt 1 -or $ScreenNumber -gt $screens.Count) {
+        throw "指定した画面は接続されていません。"
+    }
+
+    $screen = $screens[$ScreenNumber - 1]
+    $bitmap = [Drawing.Bitmap]::new([int]$screen.width, [int]$screen.height)
+    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    $stream = [IO.MemoryStream]::new()
+    try {
+        $graphics.CopyFromScreen(
+            [int]$screen.x,
+            [int]$screen.y,
+            0,
+            0,
+            $bitmap.Size,
+            [Drawing.CopyPixelOperation]::SourceCopy)
+        $bitmap.Save($stream, [Drawing.Imaging.ImageFormat]::Png)
+        return [ordered]@{
+            ok = $true
+            screen = $screen
+            capturedAt = (Get-Date).ToString("o")
+            mimeType = "image/png"
+            dataBase64 = [Convert]::ToBase64String($stream.ToArray())
+        }
+    }
+    finally {
+        $stream.Dispose()
+        $graphics.Dispose()
+        $bitmap.Dispose()
+    }
+}
+
+function Write-ControlJsonFile {
+    param(
+        [string]$Path,
+        [object]$Value
+    )
+
+    $json = $Value | ConvertTo-Json -Depth 12
+    [IO.File]::WriteAllText($Path, $json, [Text.UTF8Encoding]::new($false))
+}
+
+function Get-ControlUpdateSignatureText {
+    param([object]$Value)
+
+    return ($Value.GetEnumerator() | ForEach-Object {
+        "$($_.Key)=$($_.Value)"
+    }) -join "`n"
+}
+
+function Get-ControlUpdateHmac {
+    param(
+        [string]$Text,
+        [string]$Secret
+    )
+
+    $keyBytes = [Text.Encoding]::UTF8.GetBytes($Secret)
+    $textBytes = [Text.Encoding]::UTF8.GetBytes($Text)
+    $hmac = [Security.Cryptography.HMACSHA256]::new($keyBytes)
+    try {
+        return (($hmac.ComputeHash($textBytes) | ForEach-Object { $_.ToString("x2") }) -join "")
+    }
+    finally {
+        $hmac.Dispose()
+    }
+}
+
+function Get-ControlUpdateAuthToken {
+    if (-not (Test-Path -LiteralPath $informationControlUpdateConfigPath -PathType Leaf)) {
+        throw "更新設定ファイルがありません。"
+    }
+
+    $config = Get-Content -Raw -Encoding UTF8 -LiteralPath $informationControlUpdateConfigPath |
+        ConvertFrom-Json
+    $token = [string]$config.authToken
+    if ([string]::IsNullOrWhiteSpace($token)) {
+        throw "更新用の認証情報が設定されていません。"
+    }
+    return $token
+}
+
+function Test-ControlUpdateArchive {
+    param([string]$Path)
+
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = [IO.Compression.ZipFile]::OpenRead($Path)
+    try {
+        if ($archive.Entries.Count -eq 0) {
+            throw "更新ZIPにファイルがありません。"
+        }
+
+        $forbiddenPrefixes = @(".git/", "_update/", "temp/", "logs/", "database/runtime/")
+        foreach ($entry in $archive.Entries) {
+            $entryName = $entry.FullName.Replace("\", "/").Trim()
+            $segments = @($entryName.Split("/") | Where-Object { $_ })
+            $isInvalidPath = $entryName.StartsWith("/") -or
+                $entryName -match '^[A-Za-z]:' -or
+                $segments -contains ".."
+            if ($isInvalidPath) {
+                throw "更新ZIPに使用できないパスがあります: $entryName"
+            }
+            foreach ($prefix in $forbiddenPrefixes) {
+                if ($entryName.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+                    throw "更新対象外のパスが含まれています: $entryName"
+                }
+            }
+            if ($entryName.Equals("bin/update_config.json", [StringComparison]::OrdinalIgnoreCase)) {
+                throw "更新設定ファイルは管理画面から変更できません。"
+            }
+        }
+    }
+    finally {
+        $archive.Dispose()
+    }
+}
+
+function Start-ControlUpdateUpload {
+    param([object]$Request)
+
+    $size = [int64]$Request.size
+    if ($size -le 0 -or $size -gt $informationControlMaximumUpdateBytes) {
+        throw "更新ZIPのサイズが不正です。上限は512MBです。"
+    }
+    if ([IO.Path]::GetExtension([string]$Request.fileName) -ne ".zip") {
+        throw "ZIPファイルを選択してください。"
+    }
+
+    New-Item -ItemType Directory -Path $informationControlUploadRoot -Force | Out-Null
+    Get-ChildItem -LiteralPath $informationControlUploadRoot -File -ErrorAction SilentlyContinue |
+        Where-Object LastWriteTime -lt (Get-Date).AddHours(-24) |
+        Remove-Item -Force -ErrorAction SilentlyContinue
+
+    $uploadId = [guid]::NewGuid().ToString("N")
+    $metadata = [ordered]@{
+        uploadId = $uploadId
+        fileName = [IO.Path]::GetFileName([string]$Request.fileName)
+        expectedSize = $size
+        receivedSize = 0L
+        nextChunk = 0
+        createdAt = (Get-Date).ToString("o")
+    }
+    Write-ControlJsonFile -Path (Join-Path $informationControlUploadRoot "$uploadId.json") -Value $metadata
+    [IO.File]::WriteAllBytes((Join-Path $informationControlUploadRoot "$uploadId.part"), [byte[]]@())
+    return [ordered]@{ ok = $true; uploadId = $uploadId; nextChunk = 0 }
+}
+
+function Add-ControlUpdateUploadChunk {
+    param([object]$Request)
+
+    $uploadId = [string]$Request.uploadId
+    if ($uploadId -notmatch '^[a-f0-9]{32}$') { throw "アップロードIDが不正です。" }
+    $metadataPath = Join-Path $informationControlUploadRoot "$uploadId.json"
+    $partPath = Join-Path $informationControlUploadRoot "$uploadId.part"
+    if (-not (Test-Path -LiteralPath $metadataPath -PathType Leaf)) { throw "アップロード情報がありません。" }
+
+    $metadata = Get-Content -Raw -Encoding UTF8 -LiteralPath $metadataPath | ConvertFrom-Json
+    $chunkIndex = [int]$Request.index
+    if ($chunkIndex -ne [int]$metadata.nextChunk) { throw "更新データの送信順序が不正です。" }
+    $bytes = [Convert]::FromBase64String([string]$Request.dataBase64)
+    if ($bytes.Length -eq 0 -or $bytes.Length -gt 1048576) { throw "更新データの分割サイズが不正です。" }
+    if (([int64]$metadata.receivedSize + $bytes.Length) -gt [int64]$metadata.expectedSize) {
+        throw "更新データが予定サイズを超えています。"
+    }
+
+    $stream = [IO.File]::Open($partPath, [IO.FileMode]::Append, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    try {
+        $stream.Write($bytes, 0, $bytes.Length)
+    }
+    finally {
+        $stream.Dispose()
+    }
+    $metadata.receivedSize = [int64]$metadata.receivedSize + $bytes.Length
+    $metadata.nextChunk = $chunkIndex + 1
+    Write-ControlJsonFile -Path $metadataPath -Value $metadata
+    return [ordered]@{
+        ok = $true
+        uploadId = $uploadId
+        nextChunk = $metadata.nextChunk
+        receivedSize = $metadata.receivedSize
+    }
+}
+
+function Complete-ControlUpdateUpload {
+    param([object]$Request)
+
+    $uploadId = [string]$Request.uploadId
+    if ($uploadId -notmatch '^[a-f0-9]{32}$') { throw "アップロードIDが不正です。" }
+    $metadataPath = Join-Path $informationControlUploadRoot "$uploadId.json"
+    $partPath = Join-Path $informationControlUploadRoot "$uploadId.part"
+    if (-not (Test-Path -LiteralPath $metadataPath -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $partPath -PathType Leaf)) {
+        throw "アップロード済みの更新データがありません。"
+    }
+
+    $metadata = Get-Content -Raw -Encoding UTF8 -LiteralPath $metadataPath | ConvertFrom-Json
+    $actualSize = (Get-Item -LiteralPath $partPath).Length
+    if ($actualSize -ne [int64]$metadata.expectedSize -or $actualSize -ne [int64]$metadata.receivedSize) {
+        throw "更新データのサイズが一致しません。"
+    }
+    Test-ControlUpdateArchive -Path $partPath
+
+    New-Item -ItemType Directory -Path $informationControlUpdateInbox -Force | Out-Null
+    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss_fff"
+    $packageName = "infomation_system_update_${timestamp}_management.zip"
+    $packagePath = Join-Path $informationControlUpdateInbox $packageName
+    $authToken = Get-ControlUpdateAuthToken
+    Move-Item -LiteralPath $partPath -Destination $packagePath -Force -ErrorAction Stop
+    $createdAt = (Get-Date).ToUniversalTime().ToString("o")
+    $signedValue = [ordered]@{
+        schemaVersion = 1
+        package = $packageName
+        sha256 = (Get-FileHash -LiteralPath $packagePath -Algorithm SHA256 -ErrorAction Stop).Hash
+        createdAt = $createdAt
+        sourceComputer = "MANAGEMENT-WEB"
+        restartAfterUpdate = $true
+    }
+    $manifest = [ordered]@{}
+    foreach ($item in $signedValue.GetEnumerator()) { $manifest[$item.Key] = $item.Value }
+    $manifest.signature = Get-ControlUpdateHmac `
+        -Text (Get-ControlUpdateSignatureText -Value $signedValue) `
+        -Secret $authToken
+    $readyPath = Join-Path $informationControlUpdateInbox "infomation_system_update_${timestamp}_management.ready.json"
+    Write-ControlJsonFile -Path "$readyPath.tmp" -Value $manifest
+    Move-Item -LiteralPath "$readyPath.tmp" -Destination $readyPath -Force -ErrorAction Stop
+    Remove-Item -LiteralPath $metadataPath -Force -ErrorAction SilentlyContinue
+    return [ordered]@{ ok = $true; accepted = $true; package = $packageName }
+}
+
+function Stop-ControlUpdateUpload {
+    param([object]$Request)
+
+    $uploadId = [string]$Request.uploadId
+    if ($uploadId -match '^[a-f0-9]{32}$') {
+        Remove-Item -LiteralPath (Join-Path $informationControlUploadRoot "$uploadId.json") -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath (Join-Path $informationControlUploadRoot "$uploadId.part") -Force -ErrorAction SilentlyContinue
+    }
+    return [ordered]@{ ok = $true; cancelled = $true }
+}
+
+function Invoke-ControlUpdateUpload {
+    param([object]$Request)
+
+    switch ([string]$Request.operation) {
+        "start" { return Start-ControlUpdateUpload -Request $Request }
+        "chunk" { return Add-ControlUpdateUploadChunk -Request $Request }
+        "finish" { return Complete-ControlUpdateUpload -Request $Request }
+        "cancel" { return Stop-ControlUpdateUpload -Request $Request }
+        default { throw "更新操作が不正です。" }
+    }
+}
+
 function Get-ControlStaticResponse {
     param([string]$RelativePath)
 
@@ -602,6 +1024,25 @@ function Get-ControlInformationLogs {
             }
         }
     }
+    elseif ($type -eq "earthquake_bridge") {
+        $bridgeLogFiles = @(
+            [ordered]@{ path = (Join-Path $projectDir "logs\earthquake_bridge.log"); source = "monitor" },
+            [ordered]@{ path = (Join-Path $projectDir "logs\earthquake_bridge_events.log"); source = "bridge" }
+        )
+        foreach ($logFile in $bridgeLogFiles) {
+            if (-not (Test-Path -LiteralPath $logFile.path -PathType Leaf)) { continue }
+            foreach ($line in @(Get-Content -LiteralPath $logFile.path -Encoding UTF8 | Select-Object -Last $limit)) {
+                $match = [regex]::Match([string]$line, '^(?<timestamp>\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}\.\d{3})\s+(?<message>.*)$')
+                if (-not $match.Success) { continue }
+                if ($subtype -and $match.Groups['message'].Value -notmatch [regex]::Escape($subtype)) { continue }
+                [void]$rows.Add([ordered]@{
+                    timestamp = $match.Groups['timestamp'].Value
+                    source = $logFile.source
+                    message = $match.Groups['message'].Value
+                })
+            }
+        }
+    }
     elseif ($type -eq "api") {
         $paths = @(Get-ChildItem -Path (Join-Path $projectDir "logs\information") -Filter "fetcher_*.jsonl" -File -ErrorAction SilentlyContinue |
             Sort-Object LastWriteTime -Descending)
@@ -675,7 +1116,16 @@ function Write-EarthquakeTestCommand {
         kind = $kind
         scale = if ($Request.scale) { [string]$Request.scale } else { "3" }
         hypocenter = [string]$Request.hypocenter
+        hypocenterLatitude = [string]$Request.hypocenterLatitude
+        hypocenterLongitude = [string]$Request.hypocenterLongitude
+        occurredAt = [string]$Request.occurredAt
+        earthquakeType = [string]$Request.earthquakeType
+        eewType = if ($Request.eewType) { [string]$Request.eewType } else { "announcement" }
+        magnitude = [string]$Request.magnitude
+        depth = [string]$Request.depth
+        tsunamiType = [string]$Request.tsunamiType
         eewAreas = @($Request.eewAreas)
+        earthquakeAreas = @($Request.earthquakeAreas)
         earthquakePoints = @($Request.earthquakePoints)
         tsunamiAreas = @($Request.tsunamiAreas)
         requestedAt = (Get-Date).ToString("o")
@@ -832,8 +1282,38 @@ function Invoke-InformationControlRequest {
         Write-InformationControlState
         return Get-ControlJsonResponse -Payload ([ordered]@{ ok = $true; state = Get-InformationControlState })
     }
+    if ($path -eq "/infomation_control/api/disaster-reference" -and $Method -eq "GET") {
+        return Get-ControlJsonResponse -Payload ([ordered]@{ ok = $true; data = Get-DisasterReferenceData })
+    }
     if ($path -eq "/infomation_control/api/logs" -and $Method -eq "GET") {
         return Get-ControlInformationLogs -Uri $Uri
+    }
+    if ($path -eq "/infomation_control/api/screens" -and $Method -eq "GET") {
+        try {
+            return Get-ControlJsonResponse -Payload ([ordered]@{ ok = $true; screens = @(Get-ControlScreenList) })
+        }
+        catch {
+            return New-ControlResponse -Body (([ordered]@{ ok = $false; error = $_.Exception.Message }) | ConvertTo-Json -Compress) -Status "500 Internal Server Error"
+        }
+    }
+    if ($path -eq "/infomation_control/api/screenshot" -and $Method -eq "GET") {
+        try {
+            $screenNumber = 0
+            [void][int]::TryParse((Get-QueryValue -Uri $Uri -Name "screen"), [ref]$screenNumber)
+            return Get-ControlJsonResponse -Payload (Get-ControlScreenshot -ScreenNumber $screenNumber)
+        }
+        catch {
+            return New-ControlResponse -Body (([ordered]@{ ok = $false; error = $_.Exception.Message }) | ConvertTo-Json -Compress) -Status "400 Bad Request"
+        }
+    }
+    if ($path -eq "/infomation_control/api/update-upload" -and $Method -eq "POST") {
+        try {
+            $request = $Body | ConvertFrom-Json
+            return Get-ControlJsonResponse -Payload (Invoke-ControlUpdateUpload -Request $request)
+        }
+        catch {
+            return New-ControlResponse -Body (([ordered]@{ ok = $false; error = $_.Exception.Message }) | ConvertTo-Json -Compress) -Status "400 Bad Request"
+        }
     }
     if ($path -eq "/infomation_control/api/action" -and $Method -eq "POST") {
         try {

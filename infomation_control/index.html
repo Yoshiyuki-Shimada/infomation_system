@@ -21,6 +21,7 @@
             <button class="tab" data-tab="timetable">時刻表</button>
             <button class="tab" data-tab="routes">路線マスタ</button>
             <button class="tab" data-tab="signal">時報</button>
+            <button class="tab" data-tab="system">システム</button>
             <button class="tab" data-tab="network">ログ</button>
         </nav>
 
@@ -30,23 +31,87 @@
                 <div class="disaster-test-grid">
                     <section class="control-block">
                         <h3>緊急地震速報</h3>
-                        <label>震源<input id="eew-hypocenter" value="大阪府" /></label>
-                        <label>警報地点（カンマまたは改行区切り）
-                            <textarea id="eew-areas">大阪、兵庫、京都、奈良</textarea>
-                        </label>
-                        <button data-disaster-test="eew">テスト送信</button>
+                        <label>震源<select id="eew-hypocenter"></select></label>
+                        <label>発生時刻<input id="eew-occurred-at" type="datetime-local"></label>
+                        <div class="assignment-picker">
+                            <label>警報地点<select id="eew-area-available" multiple size="14"></select></label>
+                            <div class="assignment-buttons">
+                                <button id="add-eew-area" class="secondary" type="button">&gt;</button>
+                                <button id="add-all-eew-areas" class="secondary" type="button">&gt;&gt;</button>
+                                <button id="remove-eew-area" class="secondary" type="button">&lt;</button>
+                                <button id="remove-all-eew-areas" class="secondary" type="button">&lt;&lt;</button>
+                            </div>
+                            <label class="assignment-target">対象地域<select id="eew-area-selected" multiple size="14"></select></label>
+                        </div>
+                        <div class="eew-test-buttons">
+                            <button data-disaster-test="eew" data-eew-type="announcement">発表を送信</button>
+                            <button data-disaster-test="eew" data-eew-type="follow-up">続報を送信</button>
+                            <button class="danger" data-disaster-test="eew" data-eew-type="cancel">取消報を送信</button>
+                        </div>
                     </section>
                     <section class="control-block">
                         <h3>地震情報</h3>
-                        <label>震源<input id="quake-hypocenter" value="大阪府北部" /></label>
-                        <div id="quake-test-points" class="test-point-list"></div>
-                        <button id="add-quake-point" class="secondary" type="button">観測点を追加</button>
-                        <button data-disaster-test="earthquake">テスト送信</button>
+                        <label>震源<select id="quake-hypocenter"></select></label>
+                        <div class="test-detail-grid">
+                            <label>発生時刻<input id="quake-occurred-at" type="datetime-local"></label>
+                            <label>マグニチュード<input id="quake-magnitude" type="number" min="0" max="10" step="0.1" value="5.0"></label>
+                            <label>深さ（km）<input id="quake-depth" type="number" min="0" max="1000" step="1" value="10"></label>
+                            <label>津波情報<select id="quake-tsunami-type">
+                                <option>津波なし</option>
+                                <option>調査中</option>
+                                <option>津波あり</option>
+                                <option>津波警報等発表中</option>
+                            </select></label>
+                        </div>
+                        <h4>震度速報の地域</h4>
+                        <div class="assignment-category"><label>指定震度<select id="quake-area-scale"></select></label></div>
+                        <div class="assignment-picker">
+                            <label>地域<select id="quake-area-available" multiple size="14"></select></label>
+                            <div class="assignment-buttons">
+                                <button id="add-quake-area" class="secondary" type="button">&gt;</button>
+                                <button id="add-all-quake-areas" class="secondary" type="button">&gt;&gt;</button>
+                                <button id="remove-quake-area" class="secondary" type="button">&lt;</button>
+                                <button id="remove-all-quake-areas" class="secondary" type="button">&lt;&lt;</button>
+                            </div>
+                            <label class="assignment-target">指定震度の地域<select id="quake-area-selected" multiple size="14"></select></label>
+                        </div>
+                        <h4>各地の震度情報の観測拠点</h4>
+                        <div class="assignment-category"><label>指定震度<select id="quake-point-scale"></select></label></div>
+                        <div class="assignment-picker">
+                            <label>観測拠点<select id="quake-point-available" multiple size="14"></select></label>
+                            <div class="assignment-buttons">
+                                <button id="add-quake-point" class="secondary" type="button">&gt;</button>
+                                <button id="add-all-quake-points" class="secondary" type="button">&gt;&gt;</button>
+                                <button id="remove-quake-point" class="secondary" type="button">&lt;</button>
+                                <button id="remove-all-quake-points" class="secondary" type="button">&lt;&lt;</button>
+                            </div>
+                            <label class="assignment-target">指定震度の拠点<select id="quake-point-selected" multiple size="14"></select></label>
+                        </div>
+                        <div class="earthquake-test-buttons">
+                            <button data-disaster-test="earthquake" data-earthquake-type="scale-prompt">震度速報を送信</button>
+                            <button data-disaster-test="earthquake" data-earthquake-type="hypocenter">震源速報を送信</button>
+                            <button data-disaster-test="earthquake" data-earthquake-type="detail">各地の震度情報を送信</button>
+                        </div>
                     </section>
                     <section class="control-block">
                         <h3>津波情報</h3>
-                        <div id="tsunami-test-areas" class="test-point-list"></div>
-                        <button id="add-tsunami-area" class="secondary" type="button">予報区を追加</button>
+                        <div class="assignment-category">
+                            <label>種別<select id="tsunami-grade-select">
+                                <option>大津波警報</option>
+                                <option>津波警報</option>
+                                <option selected>津波注意報</option>
+                            </select></label>
+                        </div>
+                        <div class="assignment-picker">
+                            <label>津波予報区<select id="tsunami-area-available" multiple size="14"></select></label>
+                            <div class="assignment-buttons">
+                                <button id="add-tsunami-area" class="secondary" type="button">&gt;</button>
+                                <button id="add-all-tsunami-areas" class="secondary" type="button">&gt;&gt;</button>
+                                <button id="remove-tsunami-area" class="secondary" type="button">&lt;</button>
+                                <button id="remove-all-tsunami-areas" class="secondary" type="button">&lt;&lt;</button>
+                            </div>
+                            <label class="assignment-target">指定種別の予報区<select id="tsunami-area-selected" multiple size="14"></select></label>
+                        </div>
                         <button data-disaster-test="tsunami">テスト送信</button>
                     </section>
                 </div>
@@ -197,6 +262,49 @@
                     <button id="pause-signal">指定時刻まで停止</button>
                     <button id="resume-signal" class="secondary">今すぐ解除</button>
                 </div>
+            </section>
+
+            <section class="panel" id="panel-system">
+                <h2>スクリーンショット</h2>
+                <p id="screen-summary">接続画面を確認中</p>
+                <div class="screenshot-grid">
+                    <figure class="screenshot-preview">
+                        <figcaption>画面1</figcaption>
+                        <div class="screenshot-image-wrap"><img id="screenshot-1" alt="画面1のスクリーンショット" /></div>
+                        <div class="command-row compact">
+                            <button type="button" data-capture-screen="1">画面1を取得</button>
+                            <a id="download-screenshot-1" class="button-link is-disabled" download="infomation-system-screen-1.png">保存</a>
+                        </div>
+                    </figure>
+                    <figure class="screenshot-preview">
+                        <figcaption>画面2</figcaption>
+                        <div class="screenshot-image-wrap"><img id="screenshot-2" alt="画面2のスクリーンショット" /></div>
+                        <div class="command-row compact">
+                            <button type="button" data-capture-screen="2">画面2を取得</button>
+                            <a id="download-screenshot-2" class="button-link is-disabled" download="infomation-system-screen-2.png">保存</a>
+                        </div>
+                    </figure>
+                </div>
+
+                <h2>画面・システム操作</h2>
+                <div class="command-row system-actions">
+                    <button id="display-wake" type="button">画面点灯</button>
+                    <button id="display-off" class="secondary" type="button">画面消灯</button>
+                    <button id="restart-system" class="danger" type="button">システム再起動</button>
+                </div>
+
+                <h2>システムアップデート</h2>
+                <p>既定の更新元から <strong>infomation_system</strong> フォルダーを選択すると、更新ZIPを自動生成して送信します。</p>
+                <div class="update-source-settings">
+                    <label>更新元パス<input id="update-source-path" type="text" value="D:\開発\infomation_system" spellcheck="false" /></label>
+                    <button id="save-update-source-path" class="secondary" type="button">既定に設定</button>
+                </div>
+                <div class="update-controls">
+                    <label>更新元フォルダー<input id="update-file" type="file" webkitdirectory directory multiple /></label>
+                    <button id="apply-update" type="button">更新を適用</button>
+                </div>
+                <progress id="update-progress" max="100" value="0" hidden></progress>
+                <p id="update-status">既定の更新元からinfomation_systemフォルダーを選択してください。</p>
             </section>
 
             <section class="panel" id="panel-network">

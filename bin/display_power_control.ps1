@@ -8,8 +8,13 @@ $ErrorActionPreference = "Stop"
 $rootDir = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $tempDir = Join-Path -Path $rootDir -ChildPath "temp"
 $logPath = Join-Path -Path $tempDir -ChildPath "display_power_control.log"
+$manualAwakePath = Join-Path -Path $tempDir -ChildPath "display_manual_awake.flag"
+$emergencyAwakeUntilPath = Join-Path -Path $tempDir -ChildPath "display_emergency_awake_until.txt"
+$emergencyWakeRequestPath = Join-Path -Path $tempDir -ChildPath "display_emergency_wake_request.txt"
 $script:MonitorIsOff = $false
 $script:LastOffSignalAt = $null
+$script:LastEmergencyWakeSignalAt = $null
+$script:LastEmergencyWakeRequestId = ""
 
 if (-not (Test-Path -LiteralPath $tempDir -PathType Container)) {
     New-Item -Path $tempDir -ItemType Directory -Force | Out-Null
@@ -35,6 +40,16 @@ public static class DisplayPowerNativeMethods
         int dy,
         int dwData,
         UIntPtr dwExtraInfo);
+
+    [DllImport("user32.dll")]
+    public static extern void keybd_event(
+        byte bVk,
+        byte bScan,
+        uint dwFlags,
+        UIntPtr dwExtraInfo);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern uint SetThreadExecutionState(uint esFlags);
 
     [StructLayout(LayoutKind.Sequential)]
     public struct LASTINPUTINFO
@@ -72,10 +87,41 @@ function Send-MonitorOffCommand {
 }
 
 function Wake-Display {
-    # A tiny mouse move wakes displays without waiting on window messages.
+    $hwndBroadcast = [IntPtr]::new(0xffff)
+    $wmSysCommand = 0x0112
+    $scMonitorPower = 0xF170
+    $monitorPowerOn = -1
+    $esContinuous = [uint32]2147483648
+    $esSystemRequired = [uint32]0x00000001
+    $esDisplayRequired = [uint32]0x00000002
+    $virtualKeyShift = [byte]0x10
+    $keyEventKeyUp = [uint32]0x0002
+
+    # Windowsへ表示必須を通知し、モニター復帰と入力の両方を送る。
+    [DisplayPowerNativeMethods]::SetThreadExecutionState(
+        $esContinuous -bor $esSystemRequired -bor $esDisplayRequired) | Out-Null
+    [DisplayPowerNativeMethods]::PostMessage(
+        $hwndBroadcast,
+        $wmSysCommand,
+        [IntPtr]::new($scMonitorPower),
+        [IntPtr]::new($monitorPowerOn)) | Out-Null
     [DisplayPowerNativeMethods]::mouse_event(0x0001, 1, 0, 0, [UIntPtr]::Zero)
     Start-Sleep -Milliseconds 80
     [DisplayPowerNativeMethods]::mouse_event(0x0001, -1, 0, 0, [UIntPtr]::Zero)
+    [DisplayPowerNativeMethods]::keybd_event($virtualKeyShift, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 50
+    [DisplayPowerNativeMethods]::keybd_event($virtualKeyShift, 0, $keyEventKeyUp, [UIntPtr]::Zero)
+}
+
+function Wake-DisplayBurst {
+    param([int]$Count = 3)
+
+    for ($index = 0; $index -lt $Count; $index++) {
+        Wake-Display
+        if ($index -lt ($Count - 1)) {
+            Start-Sleep -Milliseconds 250
+        }
+    }
 }
 
 function Get-LastInputTime {
@@ -137,11 +183,77 @@ function Test-ManualDisplayAwake {
     return $true
 }
 
+function Test-EmergencyDisplayAwake {
+    param([datetime]$Now)
+
+    if (-not (Test-Path -LiteralPath $emergencyAwakeUntilPath -PathType Leaf)) {
+        return $false
+    }
+
+    try {
+        $untilText = Get-Content -Raw -Encoding UTF8 -LiteralPath $emergencyAwakeUntilPath
+        $until = [datetime]::MinValue
+        if ([datetime]::TryParse($untilText.Trim(), [ref]$until) -and $Now -lt $until) {
+            return $true
+        }
+    }
+    catch {
+        Write-DisplayPowerLog "emergency wake state read error: $($_.Exception.Message)"
+    }
+
+    Remove-Item -LiteralPath $emergencyAwakeUntilPath -Force -ErrorAction SilentlyContinue
+    return $false
+}
+
+function Get-EmergencyWakeRequestId {
+    if (-not (Test-Path -LiteralPath $emergencyWakeRequestPath -PathType Leaf)) {
+        return ""
+    }
+
+    try {
+        return (Get-Content -Raw -Encoding UTF8 -LiteralPath $emergencyWakeRequestPath).Trim()
+    }
+    catch {
+        Write-DisplayPowerLog "emergency wake request read error: $($_.Exception.Message)"
+        return ""
+    }
+}
+
 function Invoke-DisplayPowerCheck {
     $now = Get-Date
     $shouldTurnOff = Get-ShouldTurnDisplayOff -Now $now
 
     if ($shouldTurnOff) {
+        if (Test-EmergencyDisplayAwake -Now $now) {
+            $requestId = Get-EmergencyWakeRequestId
+            $isNewRequest = $requestId -and $requestId -ne $script:LastEmergencyWakeRequestId
+            $secondsSinceEmergencyWake = if ($script:LastEmergencyWakeSignalAt) {
+                ($now - $script:LastEmergencyWakeSignalAt).TotalSeconds
+            } else {
+                [double]::PositiveInfinity
+            }
+
+            # 手動消灯は別プロセスから実行されるため、内部状態に依存せず再点灯する。
+            if ($isNewRequest -or $script:MonitorIsOff -or $secondsSinceEmergencyWake -ge 5) {
+                if ($isNewRequest) {
+                    Wake-DisplayBurst
+                }
+                else {
+                    Wake-Display
+                }
+                $script:MonitorIsOff = $false
+                $script:LastOffSignalAt = $null
+                $script:LastEmergencyWakeSignalAt = $now
+                if ($requestId) {
+                    $script:LastEmergencyWakeRequestId = $requestId
+                }
+                Write-DisplayPowerLog "emergency information display wake signal sent request=$requestId new=$isNewRequest"
+            }
+            return
+        }
+
+        $script:LastEmergencyWakeSignalAt = $null
+
         if (Test-DisplayWakeInput) {
             Set-ManualDisplayAwake
             Wake-Display
@@ -209,5 +321,5 @@ while ($true) {
         break
     }
 
-    Start-Sleep -Seconds 10
+    Start-Sleep -Seconds 2
 }

@@ -28,7 +28,12 @@ namespace Map.Model
             var stations = Stations.Instance;
             var coordinates = ObservationPoints
                 .Select(e => stations.GetPoint(e.Name, e.Prefecture))
-                .Where(e => e != null);
+                .Where(e => e != null)
+                .ToArray();
+            if (coordinates.Length == 0)
+            {
+                return null;
+            }
 
             return new LTRBCoordinate(
                 coordinates.Select(e => e.Longitude).Min(),
@@ -44,33 +49,8 @@ namespace Map.Model
             var drawAreaSize = Image.Width > 1024 ? 24 : 16;
 
             var stations = Stations.Instance;
-            // XXX: かしこくない実装方法
-            var scaleImages = new Dictionary<int, Image>() {
-                { 10, Image.Load(new MemoryStream(Map.ImageResource.Scale10)) },
-                { 20, Image.Load(new MemoryStream(Map.ImageResource.Scale20)) },
-                { 30, Image.Load(new MemoryStream(Map.ImageResource.Scale30)) },
-                { 40, Image.Load(new MemoryStream(Map.ImageResource.Scale40)) },
-                { 45, Image.Load(new MemoryStream(Map.ImageResource.Scale45)) },
-                { 46, Image.Load(new MemoryStream(Map.ImageResource.Scale46)) },
-                { 50, Image.Load(new MemoryStream(Map.ImageResource.Scale50)) },
-                { 55, Image.Load(new MemoryStream(Map.ImageResource.Scale55)) },
-                { 60, Image.Load(new MemoryStream(Map.ImageResource.Scale60)) },
-                { 70, Image.Load(new MemoryStream(Map.ImageResource.Scale70)) },
-            };
-            scaleImages.Values.ToList().ForEach(e => e.Mutate(x => x.Resize(drawPointSize, drawPointSize)));
-            var scaleAreaImages = new Dictionary<int, Image>() {
-                { 10, Image.Load(new MemoryStream(Map.ImageResource.Scale10)) },
-                { 20, Image.Load(new MemoryStream(Map.ImageResource.Scale20)) },
-                { 30, Image.Load(new MemoryStream(Map.ImageResource.Scale30)) },
-                { 40, Image.Load(new MemoryStream(Map.ImageResource.Scale40)) },
-                { 45, Image.Load(new MemoryStream(Map.ImageResource.Scale45)) },
-                { 46, Image.Load(new MemoryStream(Map.ImageResource.Scale46)) },
-                { 50, Image.Load(new MemoryStream(Map.ImageResource.Scale50)) },
-                { 55, Image.Load(new MemoryStream(Map.ImageResource.Scale55)) },
-                { 60, Image.Load(new MemoryStream(Map.ImageResource.Scale60)) },
-                { 70, Image.Load(new MemoryStream(Map.ImageResource.Scale70)) },
-            };
-            scaleAreaImages.Values.ToList().ForEach(e => e.Mutate(x => x.Resize(drawAreaSize, drawAreaSize)));
+            var scaleImages = CreateScaleImages(drawPointSize);
+            var scaleAreaImages = CreateScaleImages(drawAreaSize);
 
             var trans = new Transformation
             {
@@ -80,21 +60,59 @@ namespace Map.Model
                 LTRBCoordinate = LTRB,
             };
 
-            foreach (var point in ObservationPoints.OrderBy(e => e.Scale))
+            try
             {
-                var coordinate = stations.GetPoint(point.Name, point.Prefecture);
-                if (coordinate == null)
+                foreach (var point in ObservationPoints.OrderBy(e => e.Scale))
                 {
-                    continue;
+                    var coordinate = stations.GetPoint(point.Name, point.Prefecture);
+                    if (coordinate == null || !scaleImages.ContainsKey(point.Scale))
+                    {
+                        continue;
+                    }
+
+                    var drawSize = areas.GetArea(point.Name) == null ? drawPointSize : drawAreaSize;
+                    var scaleImage = areas.GetArea(point.Name) == null ? scaleImages[point.Scale] : scaleAreaImages[point.Scale];
+
+                    var pos = trans.Geo2Pixel(coordinate);
+                    var rect = new Rectangle(pos.X - (drawSize / 2 + 1), pos.Y - (drawSize / 2 + 1), drawSize + 2, drawSize + 2);
+                    Image.Mutate(x => x.Fill(Color.Black, rect));
+                    Image.Mutate(x => x.DrawImage(scaleImage, new Point(pos.X - (drawSize / 2), pos.Y - (drawSize / 2)), 1));
                 }
+            }
+            finally
+            {
+                DisposeImages(scaleImages);
+                DisposeImages(scaleAreaImages);
+            }
+        }
 
-                var drawSize = areas.GetArea(point.Name) == null ? drawPointSize : drawAreaSize;
-                var scaleImage = areas.GetArea(point.Name) == null ? scaleImages[point.Scale] : scaleAreaImages[point.Scale];
+        private static Dictionary<int, Image> CreateScaleImages(int size)
+        {
+            var images = new Dictionary<int, Image>
+            {
+                { 10, Image.Load(new MemoryStream(Map.ImageResource.Scale10)) },
+                { 20, Image.Load(new MemoryStream(Map.ImageResource.Scale20)) },
+                { 30, Image.Load(new MemoryStream(Map.ImageResource.Scale30)) },
+                { 40, Image.Load(new MemoryStream(Map.ImageResource.Scale40)) },
+                { 45, Image.Load(new MemoryStream(Map.ImageResource.Scale45)) },
+                { 46, Image.Load(new MemoryStream(Map.ImageResource.Scale46)) },
+                { 50, Image.Load(new MemoryStream(Map.ImageResource.Scale50)) },
+                { 55, Image.Load(new MemoryStream(Map.ImageResource.Scale55)) },
+                { 60, Image.Load(new MemoryStream(Map.ImageResource.Scale60)) },
+                { 70, Image.Load(new MemoryStream(Map.ImageResource.Scale70)) },
+            };
+            foreach (var image in images.Values)
+            {
+                image.Mutate(context => context.Resize(size, size));
+            }
+            return images;
+        }
 
-                var pos = trans.Geo2Pixel(coordinate);
-                var rect = new Rectangle(pos.X - (drawSize / 2 + 1), pos.Y - (drawSize / 2 + 1), drawSize + 2, drawSize + 2);
-                Image.Mutate(x => x.Fill(Color.Black, rect));
-                Image.Mutate(x => x.DrawImage(scaleImage, new Point(pos.X - (drawSize / 2), pos.Y - (drawSize / 2)), 1));
+        private static void DisposeImages(Dictionary<int, Image> images)
+        {
+            foreach (var image in images.Values)
+            {
+                image.Dispose();
             }
         }
     }

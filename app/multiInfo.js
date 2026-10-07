@@ -4,11 +4,14 @@ let currentVisibleSlideIndex = -1;
 
 let slideTimerId = null;
 let emergencyInfoTimerId = null;
+let eewRotationTimerId = null;
 let emergencyInfoState = { recentId: "", mode: "a", index: 0, startedAt: 0 };
 const DEFAULT_SLIDE_INTERVAL_MS = 30000;
 const SCROLL_END_WAIT_MS = 10000;
 const SCROLL_START_DELAY_MS = 10000;
+const NEWS_RAILWAY_SCROLL_SECONDS_PER_LINE = 6;
 const EMERGENCY_INFO_FRAME_INTERVAL_MS = 5000;
+const EEW_ROTATION_INTERVAL_MS = 5000;
 const EMERGENCY_RECENT_REPEAT_MS = 5 * 60 * 1000;
 const SIGNAGE_DATA_MAX_TIME_OFFSET_MS = 30 * 60 * 1000;
 const INFORMATION_DISPLAY_LOG_URL =
@@ -281,19 +284,25 @@ function getUpdateSignature(value) {
 }
 
 function getDisasterPriorityKinds(data) {
+    const activeEews = getActiveEews(data);
     const candidates = [
-        { kind: "eew", active: !!data?.eew, issueTime: data?.eew?.issueTime },
+        { kind: "eew", active: activeEews.length > 0, issueTime: activeEews[0]?.issueTime },
         {
             kind: "tsunami",
             active: !!data?.tsunami?.active,
             issueTime: data?.tsunami?.issueTime,
         },
-        {
-            kind: "earthquake",
-            active: !!data?.earthquake,
-            issueTime: data?.earthquake?.issueTime,
-        },
     ];
+    const priorityEarthquakes = Array.isArray(data?.emergencyEarthquakes)
+        ? data.emergencyEarthquakes
+        : data?.earthquake
+          ? [data.earthquake]
+          : [];
+    priorityEarthquakes.forEach((quake) => candidates.push({
+        kind: `earthquake:${quake.id || quake.eventId || "latest"}`,
+        active: true,
+        issueTime: quake.issueTime,
+    }));
 
     return candidates
         .filter((candidate) => candidate.active)
@@ -312,6 +321,13 @@ function getDisasterPriorityKinds(data) {
             return rightTime - leftTime || left.index - right.index;
         })
         .map((candidate) => candidate.kind);
+}
+
+function getActiveEews(data) {
+    if (Array.isArray(data?.eews) && data.eews.length > 0) {
+        return data.eews;
+    }
+    return data?.eew ? [data.eew] : [];
 }
 
 function getComparableSignageData(data) {
@@ -561,8 +577,10 @@ function renderActiveSignage(startCycleIndex = 0) {
         document.getElementById("idle-view").style.display = "none";
         document.getElementById("signage-header").style.display = "flex";
         clearEmergencyInfoTimer();
+        clearEewRotationTimer();
         container.innerHTML = slideList.join("");
         startEmergencyInfoLineRotation(container);
+        startEewRotation(container);
         container.style.display = "block";
 
         if (slideList.length > 0) {
@@ -597,26 +615,33 @@ function importTsunamiData() {
 
 function importEarthquakeData() {
     const activeEarthquakeData = getActiveEarthquakeData();
-    if (activeEarthquakeData?.eew) {
-        emergencyList.push(createEewHtml(activeEarthquakeData.eew));
+    const activeEews = getActiveEews(activeEarthquakeData);
+    if (activeEews.length > 0) {
+        emergencyList.push(createEewRotationHtml(activeEews));
     }
 
-    const q = activeEarthquakeData?.earthquake || signageData.earthquake;
-    if (!q) return;
+    const activeQuakes = Array.isArray(activeEarthquakeData?.earthquakes) && activeEarthquakeData.earthquakes.length
+        ? activeEarthquakeData.earthquakes
+        : activeEarthquakeData?.earthquake
+          ? [activeEarthquakeData.earthquake]
+          : signageData.earthquake
+            ? [signageData.earthquake]
+            : [];
+    if (!activeQuakes.length) return;
 
     if (activeEarthquakeData) {
         if (
             activeEarthquakeData.priorityMode === "disaster" ||
             activeEarthquakeData.priorityMode === "normal"
         ) {
-            emergencyList.push(createEarthquakeHtml(q));
+            activeQuakes.forEach((quake) => emergencyList.push(createEarthquakeHtml(quake)));
         }
         return;
     }
 
-    if (q.ikunoScale >= 10 || q.maxScale >= 45) {
-        emergencyList.push(createEarthquakeHtml(q));
-    }
+    activeQuakes
+        .filter((quake) => quake.ikunoScale >= 10 || quake.maxScale >= 45)
+        .forEach((quake) => emergencyList.push(createEarthquakeHtml(quake)));
 }
 /**
  * 避難情報の取得
@@ -1003,6 +1028,7 @@ function infoDataFailed() {
     pendingNonNewsApplied = false;
     clearSlideTimer();
     clearEmergencyInfoTimer();
+    clearEewRotationTimer();
     const idleView = document.getElementById("idle-view");
     const headerView = document.getElementById("signage-header");
     const container = document.getElementById("slide-container");
@@ -1280,6 +1306,35 @@ function clearEmergencyInfoTimer() {
     }
 }
 
+function clearEewRotationTimer() {
+    if (eewRotationTimerId) {
+        clearInterval(eewRotationTimerId);
+        eewRotationTimerId = null;
+    }
+}
+
+function startEewRotation(root = document) {
+    clearEewRotationTimer();
+    const rotationSet = root.querySelector(".eew-rotation-set");
+    if (!rotationSet) return;
+
+    const frames = Array.from(rotationSet.querySelectorAll(".eew-rotation-frame"));
+    if (frames.length <= 1) return;
+
+    let activeIndex = 0;
+    const showFrame = () => {
+        frames.forEach((frame, index) => {
+            frame.classList.toggle("is-active", index === activeIndex);
+        });
+    };
+
+    showFrame();
+    eewRotationTimerId = setInterval(() => {
+        activeIndex = (activeIndex + 1) % frames.length;
+        showFrame();
+    }, EEW_ROTATION_INTERVAL_MS);
+}
+
 function setEmergencyInfoFrame(frames, index) {
     frames.forEach((frame, frameIndex) => frame.classList.toggle("is-active", frameIndex === index));
 }
@@ -1361,6 +1416,29 @@ function resetAutoScrollContent(content) {
     content.style.removeProperty("--auto-scroll-delay");
 }
 
+function getAutoScrollLineHeight(slide, content) {
+    const measurementTarget = slide.querySelector(
+        ".news_article, .railway-main-body, .quake-pref-line, .tsunami-area-item",
+    ) || content;
+    const computedStyle = window.getComputedStyle(measurementTarget);
+    const explicitLineHeight = Number.parseFloat(computedStyle.lineHeight);
+    if (Number.isFinite(explicitLineHeight) && explicitLineHeight > 0) {
+        return explicitLineHeight;
+    }
+
+    const fontSize = Number.parseFloat(computedStyle.fontSize);
+    return Number.isFinite(fontSize) && fontSize > 0 ? fontSize * 1.5 : 24;
+}
+
+function getAutoScrollDurationSeconds(slide, content, distance) {
+    const lineHeight = getAutoScrollLineHeight(slide, content);
+    const lineCount = distance / lineHeight;
+    return Math.max(
+        NEWS_RAILWAY_SCROLL_SECONDS_PER_LINE,
+        lineCount * NEWS_RAILWAY_SCROLL_SECONDS_PER_LINE,
+    );
+}
+
 function prepareAutoScroll(slide) {
     const viewport = slide.querySelector(".auto-scroll-viewport");
     if (!viewport) return DEFAULT_SLIDE_INTERVAL_MS;
@@ -1374,7 +1452,7 @@ function prepareAutoScroll(slide) {
     const distance = Math.max(0, content.scrollHeight - viewport.clientHeight);
     if (distance <= 4) return DEFAULT_SLIDE_INTERVAL_MS;
 
-    const duration = Math.min(60, Math.max(20, distance / 8));
+    const duration = getAutoScrollDurationSeconds(slide, content, distance);
     const durationMs = duration * 1000;
     content.style.setProperty("--auto-scroll-distance", `-${distance}px`);
     content.style.setProperty("--auto-scroll-duration", `${duration}s`);

@@ -483,7 +483,7 @@ function createRailwayInfoBodyHtml(
  */
 function createNewsDataHtml(title, htmlText) {
     return `
-        <div class="slide">
+        <div class="slide" data-slide-type="news">
             <div class="slide-title">ニュース</div>
             <div class="slide-content news-fixed-layout">
                 <div class="news-fixed-header">
@@ -1034,9 +1034,8 @@ function createWeeklyWeatherHtml(weeklyWeather) {
                     >
                     <div class="weather_weekly_name">${weatherName}</div>
                     <div class="weather_weekly_temperature">
-                        <span class="weather_weekly_max">${maxTemperature}℃</span>
-                        <span class="weather_weekly_slash">/</span>
-                        <span class="weather_weekly_min">${minTemperature}℃</span>
+                        <span class="weather_weekly_max">最高 ${maxTemperature}℃</span>
+                        <span class="weather_weekly_min">最低 ${minTemperature}℃</span>
                     </div>
                     <div class="weather_weekly_precipitation">
                         降水確率 ${precipitationProbability}
@@ -1075,6 +1074,32 @@ function formatDisasterTime(value) {
     return `${date.getMonth() + 1}月${date.getDate()}日${date.getHours()}時${String(date.getMinutes()).padStart(2, "0")}分`;
 }
 
+function formatEewOccurrenceTime(value) {
+    if (!value) return "-";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return escapeDisasterHtml(value);
+
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    const hour = String(date.getHours()).padStart(2, "0");
+    const minute = String(date.getMinutes()).padStart(2, "0");
+    return `${month}月${day}日 ${hour}時${minute}分`;
+}
+
+function formatEewReceivedTime(value) {
+    if (!value) return "-";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return escapeDisasterHtml(value);
+
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    const hour = String(date.getHours()).padStart(2, "0");
+    const minute = String(date.getMinutes()).padStart(2, "0");
+    const second = String(date.getSeconds()).padStart(2, "0");
+    const millisecond = String(date.getMilliseconds()).padStart(3, "0");
+    return `${month}月${day}日 ${hour}時${minute}分${second}秒${millisecond}`;
+}
+
 function formatEewIssueTime(value) {
     if (!value) return "";
     const date = new Date(value);
@@ -1106,34 +1131,33 @@ function createDisasterMapHtml(data, altText) {
 
 function createEewHtml(eew) {
     if (!eew) return "";
-    const areaItems = (eew.areas || [])
-        .map(
-            (area) => `
-                <div class="eew-area-item">
-                    <span>${escapeDisasterHtml(area.pref || area.name)}</span>
-                </div>
-            `,
-        )
-        .join("");
+    const areas = Array.isArray(eew.displayAreas) ? eew.displayAreas : (eew.areas || []);
+    const areaText = areas
+        .map((area) => escapeDisasterHtml(area.pref || area.name))
+        .join("　");
     const title = eew.cancelled
-        ? "緊急地震速報 取り消し"
+        ? "緊急地震速報 取り消し（気象庁）"
         : eew.isFollowUp
-          ? "緊急地震速報 続報"
-          : "緊急地震速報";
+          ? "緊急地震速報 続報（気象庁）"
+          : "緊急地震速報（気象庁）";
+    const hypocenter = escapeDisasterHtml(eew.hypocenter || "震源調査中");
+    const occurredAt = formatEewOccurrenceTime(eew.originTime || eew.issueTime);
+    const receivedAt = formatEewReceivedTime(eew.issueTime);
+    const eventHeading = eew.cancelled
+        ? "先ほどの緊急地震速報は取り消されました"
+        : `${hypocenter}で地震`;
 
     return `
         <div class="slide eew-slide">
             <div class="slide-title">${title}</div>
             <div class="slide-content disaster-content-grid eew-content">
                 <div class="disaster-detail-panel">
-                    <div class="eew-main-title">${eew.cancelled ? "先ほどの緊急地震速報は取り消されました" : "強い揺れに警戒"}</div>
-                    <div class="eew-detail-grid">
-                        <div><span>震源</span><strong>${escapeDisasterHtml(eew.hypocenter || "調査中")}</strong></div>
-                        <div><span>発表</span><strong>${formatEewIssueTime(eew.issueTime)}</strong></div>
-                        <div><span>規模</span><strong>${eew.magnitude ? `M${escapeDisasterHtml(eew.magnitude)}` : "調査中"}</strong></div>
-                        <div><span>深さ</span><strong>${eew.depth ? `${escapeDisasterHtml(eew.depth)}km` : "調査中"}</strong></div>
+                    <div class="eew-main-title">${eventHeading}</div>
+                    <div class="eew-event-times">
+                        <div>発生：${occurredAt}</div>
+                        <div>受信：${receivedAt}</div>
                     </div>
-                    <div class="eew-area-list">${areaItems}</div>
+                    <div class="eew-area-text">${areaText}</div>
                 </div>
                 ${createDisasterMapHtml(eew, "緊急地震速報の対象地域地図")}
             </div>
@@ -1141,15 +1165,40 @@ function createEewHtml(eew) {
     `;
 }
 
+function createEewRotationHtml(eews) {
+    const activeEews = Array.isArray(eews) ? eews.filter(Boolean) : [];
+    if (activeEews.length === 0) return "";
+
+    const frames = activeEews
+        .map((eew, index) => createEewHtml(eew).replace(
+            '<div class="slide eew-slide">',
+            `<div class="eew-rotation-frame eew-slide${index === 0 ? " is-active" : ""}">`,
+        ))
+        .join("");
+
+    return `
+        <div class="slide eew-rotation-slide">
+            <div class="eew-rotation-set">
+                ${frames}
+            </div>
+        </div>
+    `;
+}
+
 function createTsunamiHtml(tsunamiData = null) {
-    const areas = tsunamiData?.areas || [];
+    const gradeOrder = { "大津波警報": 0, "津波警報": 1, "津波注意報": 2 };
+    const areas = [...(tsunamiData?.areas || [])].sort((left, right) =>
+        (gradeOrder[left.grade] ?? 3) - (gradeOrder[right.grade] ?? 3) ||
+        String(left.name || "").localeCompare(String(right.name || ""), "ja"),
+    );
     const areaItems = areas
         .map(
             (area) => `
                 <div class="tsunami-area-item">
-                    <div class="tsunami-area-name">${escapeDisasterHtml(area.name)}</div>
                     <div class="tsunami-area-grade">${escapeDisasterHtml(area.grade || "津波情報")}</div>
-                    <div class="tsunami-area-meta">高さ ${escapeDisasterHtml(area.maxHeight || "不明")}　到達 ${escapeDisasterHtml(area.firstHeight || "調査中")}</div>
+                    <div class="tsunami-area-name">${escapeDisasterHtml(area.name)}</div>
+                    <div class="tsunami-area-meta">高さ：${escapeDisasterHtml(area.maxHeight || "不明")}</div>
+                    <div class="tsunami-area-meta">到達：${escapeDisasterHtml(area.firstHeight || "調査中")}</div>
                 </div>
             `,
         )
@@ -1157,12 +1206,14 @@ function createTsunamiHtml(tsunamiData = null) {
 
     return `
         <div class="slide tsunami-slide">
-            <div class="slide-title">津波情報発表中</div>
+            <div class="slide-title">津波情報発表中（気象庁）</div>
             <div class="slide-content disaster-content-grid tsunami-detail">
                 <div class="disaster-detail-panel">
                     <div class="tsunami-lead">海岸や川の河口付近から離れてください</div>
-                    <div class="tsunami-detail-list">
-                        ${areaItems || "<div class=\"tsunami-area-item\">津波情報が発表されています。テレビやラジオの情報に注意してください。</div>"}
+                    <div class="auto-scroll-viewport tsunami-scroll-viewport">
+                        <div class="auto-scroll-content tsunami-detail-list">
+                            ${areaItems || "<div class=\"tsunami-area-item\">津波情報が発表されています。テレビやラジオの情報に注意してください。</div>"}
+                        </div>
                     </div>
                 </div>
                 ${createDisasterMapHtml(tsunamiData, "津波情報の対象沿岸地図")}
@@ -1176,24 +1227,32 @@ function getEarthquakeScaleGroups(q) {
         return q.scaleGroups;
     }
 
-    const scaleOrder = [70, 60, 55, 50, 45, 40, 30];
+    const scaleOrder = [1000, 70, 60, 55, 50, 45, 40, 30];
     const byScale = new Map();
     (q?.points || []).forEach((point) => {
-        const scale = Number(point.scale || 0);
+        const isMissing = point.isMissing || String(point.scaleText || "").startsWith("欠測");
+        const scale = isMissing ? 1000 : Number(point.scale || 0);
         if (scale < 30) return;
-        if (!byScale.has(scale)) byScale.set(scale, new Map());
-        const prefMap = byScale.get(scale);
+        const groupKey = `${scale}|${point.scaleText || ""}`;
+        if (!byScale.has(groupKey)) {
+            byScale.set(groupKey, {
+                scale,
+                scaleText: point.scaleText,
+                prefs: new Map(),
+            });
+        }
+        const prefMap = byScale.get(groupKey).prefs;
         const pref = point.pref || "その他";
         if (!prefMap.has(pref)) prefMap.set(pref, []);
         prefMap.get(pref).push(point.addr || "");
     });
 
-    return scaleOrder
-        .filter((scale) => byScale.has(scale))
-        .map((scale) => ({
-            scale,
-            scaleText: convertScaleTextForDisplay(scale),
-            prefs: Array.from(byScale.get(scale).entries()).map(([pref, addrs]) => ({
+    return Array.from(byScale.values())
+        .sort((left, right) => scaleOrder.indexOf(left.scale) - scaleOrder.indexOf(right.scale))
+        .map((group) => ({
+            scale: group.scale,
+            scaleText: group.scaleText || convertScaleTextForDisplay(group.scale),
+            prefs: Array.from(group.prefs.entries()).map(([pref, addrs]) => ({
                 pref,
                 addrs,
             })),
@@ -1228,9 +1287,12 @@ function createEarthquakeIntensityGroupsHtml(q) {
                     return `<div class="quake-pref-line"><span>${escapeDisasterHtml(prefGroup.pref)}：</span>${addresses}</div>`;
                 })
                 .join("");
+            const heading = String(group.scaleText || "").startsWith("欠測")
+                ? escapeDisasterHtml(group.scaleText)
+                : `震度${escapeDisasterHtml(group.scaleText)}`;
             return `
                 <section class="quake-scale-group">
-                    <div class="quake-scale-heading">震度${escapeDisasterHtml(group.scaleText)}</div>
+                    <div class="quake-scale-heading">${heading}</div>
                     <div class="quake-pref-list">${prefLines}</div>
                 </section>
             `;
@@ -1259,13 +1321,31 @@ function createEarthquakeHtml(q) {
     const intensityListHtml = hasIntensityDetails && intensityGroupsHtml
         ? `<div class="auto-scroll-viewport earthquake-points-viewport"><div class="auto-scroll-content earthquake-points-scroll"><div class="earthquake-intensity-groups">${intensityGroupsHtml}</div></div></div>`
         : "";
-    const ikunoHtml = ["ScaleAndDestination", "Detail"].includes(informationType)
-        ? `<div class="ikuno-intensity"><span>大阪市生野区</span><strong>${q.ikunoScale >= 30 ? `震度${escapeDisasterHtml(q.ikunoScaleText)}` : "震度情報なし"}</strong></div>`
-        : "";
+    const osakaNorthPoint = (q.points || []).find((point) =>
+        String(point.addr || "").includes("大阪府北部"),
+    );
+    let localIntensityHtml = "";
+    if (isScalePrompt) {
+        const scaleText = osakaNorthPoint?.scaleText || "";
+        const scaleDisplay = String(scaleText).startsWith("欠測")
+            ? escapeDisasterHtml(scaleText)
+            : scaleText
+                ? `震度${escapeDisasterHtml(scaleText)}`
+                : "震度情報なし";
+        localIntensityHtml = `<div class="ikuno-intensity"><span>大阪府北部</span><strong>${scaleDisplay}</strong></div>`;
+    } else if (["ScaleAndDestination", "Detail"].includes(informationType)) {
+        const ikunoScaleText = String(q.ikunoScaleText || "");
+        const ikunoDisplay = ikunoScaleText.startsWith("欠測")
+            ? escapeDisasterHtml(ikunoScaleText)
+            : q.ikunoScale >= 30
+                ? `震度${escapeDisasterHtml(ikunoScaleText)}`
+                : "震度情報なし";
+        localIntensityHtml = `<div class="ikuno-intensity"><span>大阪市生野区</span><strong>${ikunoDisplay}</strong></div>`;
+    }
 
     return `
         <div class="slide earthquake-slide ${bgClass}">
-            <div class="slide-title">${escapeDisasterHtml(q.informationTitle || "地震情報")}</div>
+            <div class="slide-title">${escapeDisasterHtml(q.informationTitle || "地震情報")}（気象庁）</div>
             <div class="slide-content disaster-content-grid earthquake-detail earthquake-fixed-layout">
                 <div class="disaster-detail-panel">
                     <div class="quake-summary-main">${summaryHtml}</div>
@@ -1274,7 +1354,7 @@ function createEarthquakeHtml(q) {
                 </div>
                 <div class="earthquake-map-column">
                     ${createDisasterMapHtml(q, "震源と震度分布の地図")}
-                    ${ikunoHtml}
+                    ${localIntensityHtml}
                 </div>
             </div>
         </div>
@@ -1318,14 +1398,34 @@ function createRailwayDisasterTickerHtml(railwayItems = []) {
 function createDisasterPriorityHtml(emergencyData, railwayItems = [], kind = "") {
     if (!emergencyData) return "";
     let mainHtml = "";
-    if (kind === "eew" && emergencyData.eew) {
-        mainHtml = createEewHtml(emergencyData.eew).replace('<div class="slide eew-slide">', '<div class="disaster-main-inner eew-slide">').replace('</div>\n    ', '</div>\n    ');
+    const earthquakeId = kind.startsWith("earthquake:") ? kind.slice("earthquake:".length) : "";
+    const earthquakeItems = Array.isArray(emergencyData.earthquakes) && emergencyData.earthquakes.length
+        ? emergencyData.earthquakes
+        : emergencyData.earthquake
+          ? [emergencyData.earthquake]
+          : [];
+    const selectedEarthquake = earthquakeId
+        ? earthquakeItems.find((item) => (item.id || item.eventId || "latest") === earthquakeId)
+        : emergencyData.earthquake;
+    const eewItems = Array.isArray(emergencyData.eews) && emergencyData.eews.length
+        ? emergencyData.eews
+        : emergencyData.eew
+          ? [emergencyData.eew]
+          : [];
+    if (kind === "eew" && eewItems.length > 0) {
+        mainHtml = createEewRotationHtml(eewItems).replace(
+            '<div class="slide eew-rotation-slide">',
+            '<div class="disaster-main-inner eew-rotation-slide">',
+        );
     } else if (kind === "tsunami" && emergencyData.tsunami?.active) {
         mainHtml = createTsunamiHtml(emergencyData.tsunami).replace('<div class="slide tsunami-slide">', '<div class="disaster-main-inner tsunami-slide">');
-    } else if (kind === "earthquake" && emergencyData.earthquake) {
-        mainHtml = createEarthquakeHtml(emergencyData.earthquake).replace('<div class="slide earthquake-slide ', '<div class="disaster-main-inner earthquake-slide ');
-    } else if (emergencyData.eew) {
-        mainHtml = createEewHtml(emergencyData.eew).replace('<div class="slide eew-slide">', '<div class="disaster-main-inner eew-slide">').replace('</div>\n    ', '</div>\n    ');
+    } else if (kind.startsWith("earthquake:") && selectedEarthquake) {
+        mainHtml = createEarthquakeHtml(selectedEarthquake).replace('<div class="slide earthquake-slide ', '<div class="disaster-main-inner earthquake-slide ');
+    } else if (eewItems.length > 0) {
+        mainHtml = createEewRotationHtml(eewItems).replace(
+            '<div class="slide eew-rotation-slide">',
+            '<div class="disaster-main-inner eew-rotation-slide">',
+        );
     } else if (emergencyData.tsunami?.active) {
         mainHtml = createTsunamiHtml(emergencyData.tsunami).replace('<div class="slide tsunami-slide">', '<div class="disaster-main-inner tsunami-slide">');
     } else if (emergencyData.earthquake) {
